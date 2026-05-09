@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.1
+
+- Preserve comments between array elements when arrays are re-rendered
+- Walk now requires explicit WalkMode parameter (WalkLeaves or WalkAll)
+- Preserve original key formatting (quoted vs bare) for clean keys in dirty KVs
+- Fix key node not marked dirty on Rename
+
 ## 0.1.0
 
 - Full TOML 1.0 parser with comment and whitespace preservation
