@@ -77,6 +77,12 @@ func (d *DocumentNode) resolveCommentTarget(path string) (Node, error) {
 		return nil, fmt.Errorf("parent path not found: %w", err)
 	}
 
+	// Check if the parent is an inline table. TOML does not allow comments
+	// inside inline tables, so setting a comment would produce invalid TOML.
+	if isInsideInlineTable(parent) {
+		return nil, fmt.Errorf("cannot set comment on inline table member: TOML does not allow comments inside inline tables")
+	}
+
 	kv := findKVInParent(parent, d, lastSeg.Key)
 	if kv != nil {
 		return kv, nil
@@ -84,6 +90,16 @@ func (d *DocumentNode) resolveCommentTarget(path string) (Node, error) {
 
 	// Fallback: return the resolved node itself.
 	return node, nil
+}
+
+// isInsideInlineTable returns true if the node is an InlineTableNode or
+// wraps one (e.g. a KeyValueNode whose value is inside an inline table).
+func isInsideInlineTable(node Node) bool {
+	switch node.(type) {
+	case *InlineTableNode:
+		return true
+	}
+	return false
 }
 
 // findKVInParent searches for a KeyValueNode with the given key in a parent.

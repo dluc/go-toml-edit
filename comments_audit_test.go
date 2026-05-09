@@ -136,8 +136,8 @@ func TestAudit_SetComment_ReparsePreservesComment(t *testing.T) {
 	}
 }
 
-// Audit focus 4: SetComment on inline table key.
-// config = {x = 1} -> SetComment("config.x", "inline comment")
+// Audit focus 4: SetComment on inline table key should return an error.
+// TOML does not allow comments inside inline tables.
 func TestAudit_SetComment_InlineTableKey(t *testing.T) {
 	input := `config = {x = 1, y = 2}
 `
@@ -147,36 +147,16 @@ func TestAudit_SetComment_InlineTableKey(t *testing.T) {
 	}
 
 	err = doc.SetComment("config.x", "inline comment")
-	if err != nil {
-		t.Fatalf("SetComment on inline table key: %v", err)
+	if err == nil {
+		t.Fatalf("SetComment on inline table key should return an error, but got nil")
 	}
 
-	out := string(doc.Bytes())
-	t.Logf("Bytes() output:\n%s", out)
-
-	// The comment should appear somewhere in the output.
-	if !strings.Contains(out, "# inline comment") {
-		t.Errorf("Bytes() does not contain inline comment on inline table key:\n%s", out)
-	}
-
-	// Verify the output is still valid TOML.
-	doc2, err := Parse([]byte(out))
-	if err != nil {
-		// Inline tables in TOML don't support comments -- this might fail.
-		// If so, that's an important finding: SetComment on inline table keys
-		// produces invalid TOML.
-		t.Logf("WARNING: SetComment on inline table key produced invalid TOML: %v", err)
-		t.Logf("This is a potential bug: inline tables cannot have comments per TOML spec")
-	} else {
-		// If it parses, verify the value is intact.
-		val, ok := doc2.GetInt("config.x")
-		if !ok || val != 1 {
-			t.Errorf("expected config.x=1, got %d (ok=%v)", val, ok)
-		}
+	if !strings.Contains(err.Error(), "inline table") {
+		t.Errorf("error should mention inline table, got: %v", err)
 	}
 }
 
-// Audit focus 4b: SetComment on inline table key round-trip with Format().
+// Audit focus 4b: SetComment on inline table key should return an error (Format path).
 func TestAudit_SetComment_InlineTableKey_Format(t *testing.T) {
 	input := `config = {x = 1, y = 2}
 `
@@ -186,18 +166,12 @@ func TestAudit_SetComment_InlineTableKey_Format(t *testing.T) {
 	}
 
 	err = doc.SetComment("config.x", "x value")
-	if err != nil {
-		t.Fatalf("SetComment: %v", err)
+	if err == nil {
+		t.Fatalf("SetComment on inline table key should return an error, but got nil")
 	}
 
-	out := string(doc.Format())
-	t.Logf("Format() output:\n%s", out)
-
-	// Format() re-renders from semantic values -- does it include the comment?
-	// Note: inline tables are single-line in TOML, comments inside them are
-	// not valid TOML. This test documents the actual behavior.
-	if !strings.Contains(out, "# x value") {
-		t.Logf("Format() does not include comment on inline table key (expected: inline table comments are not standard TOML)")
+	if !strings.Contains(err.Error(), "inline table") {
+		t.Errorf("error should mention inline table, got: %v", err)
 	}
 }
 
