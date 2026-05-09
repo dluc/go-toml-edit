@@ -43,7 +43,7 @@ tags = ["fancy"]
 	err = doc.Walk(func(path string, node Node) error {
 		paths = append(paths, path)
 		return nil
-	})
+	}, WalkAll)
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
@@ -109,7 +109,7 @@ weight = 2.0
 	err = doc.Walk(func(path string, node Node) error {
 		paths = append(paths, path)
 		return nil
-	})
+	}, WalkAll)
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
@@ -172,7 +172,7 @@ ip = "10.0.1.1"
 	err = doc.Walk(func(path string, node Node) error {
 		paths = append(paths, path)
 		return nil
-	})
+	}, WalkAll)
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
@@ -227,7 +227,7 @@ id = 2
 	err = doc.Walk(func(path string, node Node) error {
 		paths = append(paths, path)
 		return nil
-	})
+	}, WalkAll)
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
@@ -287,7 +287,7 @@ price = 19.99
 		}
 		paths = append(paths, path)
 		return nil
-	})
+	}, WalkAll)
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
@@ -347,7 +347,7 @@ meta = {color = "blue", weight = 2.0}
 		}
 		paths = append(paths, path)
 		return nil
-	})
+	}, WalkAll)
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
@@ -397,7 +397,7 @@ normal-key = true
 	err = doc.Walk(func(path string, node Node) error {
 		paths = append(paths, path)
 		return nil
-	})
+	}, WalkAll)
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
@@ -438,7 +438,7 @@ d = 4
 			return sentinel
 		}
 		return nil
-	})
+	}, WalkAll)
 
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("expected sentinel error, got: %v", err)
@@ -464,7 +464,7 @@ key = "val"
 	err = doc.Walk(func(path string, node Node) error {
 		paths = append(paths, path)
 		return nil
-	})
+	}, WalkAll)
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}

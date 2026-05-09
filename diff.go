@@ -98,14 +98,9 @@ func collectLeaves(doc *DocumentNode) map[string]any {
 		return leaves
 	}
 	doc.Walk(func(path string, node Node) error {
-		// Skip container nodes; we only want leaf values.
-		switch node.(type) {
-		case *InlineTableNode, *ArrayNode:
-			return nil
-		}
 		leaves[path] = node.Value()
 		return nil
-	})
+	}, WalkLeaves)
 	return leaves
 }
 

@@ -11,23 +11,41 @@ import (
 // SkipTable on a scalar node is a no-op.
 var SkipTable = errors.New("skip table")
 
+// WalkMode controls which nodes the Walk visitor function is called for.
+type WalkMode int
+
+const (
+	// WalkLeaves visits only scalar (leaf) values. Container nodes
+	// (InlineTableNode, ArrayNode) are not passed to fn, but their
+	// children are still recursed into.
+	WalkLeaves WalkMode = iota
+
+	// WalkAll visits containers (inline tables, arrays) AND their children.
+	// The visitor is called for every node.
+	WalkAll
+)
+
 // Walk visits every key-value pair in the document in order, calling fn with
 // the dot-path and the value node. Tables and array-of-tables are walked into
 // (their children are visited), not yielded as standalone entries. Inline
 // tables and arrays are yielded first, then their children are recursed into.
 //
+// The mode parameter controls which nodes are visited:
+//   - WalkLeaves: only scalar values (containers are recursed but not yielded)
+//   - WalkAll: containers AND their children are yielded
+//
 // The path uses dot-separated keys with bracket indices for array-of-tables
 // entries (e.g. "servers[0].host"). Return SkipTable from fn to skip the
 // children of the current inline table or array. Return any other non-nil
 // error to stop the walk immediately.
-func (d *DocumentNode) Walk(fn func(path string, node Node) error) error {
+func (d *DocumentNode) Walk(fn func(path string, node Node) error, mode WalkMode) error {
 	// Phase 1: root-level KVs (before any table header)
 	for _, child := range d.Children {
 		switch child.(type) {
 		case *TableNode, *ArrayTableNode:
 			// stop at first table header
 		case *KeyValueNode:
-			if err := walkKV("", child.(*KeyValueNode), fn); err != nil {
+			if err := walkKV("", child.(*KeyValueNode), fn, mode); err != nil {
 				return err
 			}
 			continue
@@ -49,7 +67,7 @@ func (d *DocumentNode) Walk(fn func(path string, node Node) error) error {
 	// A child is "owned" by an array-table entry if its KeyPath starts with
 	// that entry's KeyPath and it appears between that entry and the next
 	// entry with the same KeyPath.
-	if err := walkDocumentTables(d.Children, fn); err != nil {
+	if err := walkDocumentTables(d.Children, fn, mode); err != nil {
 		return err
 	}
 
@@ -58,7 +76,7 @@ func (d *DocumentNode) Walk(fn func(path string, node Node) error) error {
 
 // walkDocumentTables processes all TableNode and ArrayTableNode children of
 // the document, grouping sub-tables under their owning array-table entries.
-func walkDocumentTables(children []Node, fn func(string, Node) error) error {
+func walkDocumentTables(children []Node, fn func(string, Node) error, mode WalkMode) error {
 	// Global counters for top-level array-of-tables (those not owned by
 	// another array-table entry).
 	arrayCounters := map[string]int{}
@@ -78,7 +96,7 @@ func walkDocumentTables(children []Node, fn func(string, Node) error) error {
 			prefix := buildArrayTablePath("", n.KeyPath, idx)
 
 			// Walk the entry's own KV children.
-			if err := walkTableChildren(prefix, n.Children, fn); err != nil {
+			if err := walkTableChildren(prefix, n.Children, fn, mode); err != nil {
 				return err
 			}
 
@@ -97,7 +115,7 @@ func walkDocumentTables(children []Node, fn func(string, Node) error) error {
 			}
 
 			// Walk owned sub-tables with the array-table prefix.
-			if err := walkOwnedSubTables(children[ownedStart:ownedEnd], n.KeyPath, prefix, fn); err != nil {
+			if err := walkOwnedSubTables(children[ownedStart:ownedEnd], n.KeyPath, prefix, fn, mode); err != nil {
 				return err
 			}
 
@@ -109,7 +127,7 @@ func walkDocumentTables(children []Node, fn func(string, Node) error) error {
 			// since we process in order and array-table entries consume their
 			// owned children, any TableNode we see here is truly top-level.
 			prefix := buildPathFromParts("", n.KeyPath)
-			if err := walkTableChildren(prefix, n.Children, fn); err != nil {
+			if err := walkTableChildren(prefix, n.Children, fn, mode); err != nil {
 				return err
 			}
 			i++
@@ -125,7 +143,7 @@ func walkDocumentTables(children []Node, fn func(string, Node) error) error {
 // walkOwnedSubTables walks TableNode and ArrayTableNode children that belong
 // to a specific array-table entry. ownerKeyPath is the KeyPath of the owning
 // array-table, and ownerPrefix is the resolved path prefix (e.g. "products[0]").
-func walkOwnedSubTables(children []Node, ownerKeyPath []string, ownerPrefix string, fn func(string, Node) error) error {
+func walkOwnedSubTables(children []Node, ownerKeyPath []string, ownerPrefix string, fn func(string, Node) error, mode WalkMode) error {
 	// Per-entry counters for nested array-of-tables (reset per parent entry).
 	arrayCounters := map[string]int{}
 
@@ -140,7 +158,7 @@ func walkOwnedSubTables(children []Node, ownerKeyPath []string, ownerPrefix stri
 			if hasPrefix(n.KeyPath, ownerKeyPath) {
 				suffix := n.KeyPath[len(ownerKeyPath):]
 				subPrefix := buildPathFromParts(ownerPrefix, suffix)
-				if err := walkTableChildren(subPrefix, n.Children, fn); err != nil {
+				if err := walkTableChildren(subPrefix, n.Children, fn, mode); err != nil {
 					return err
 				}
 			}
@@ -156,7 +174,7 @@ func walkOwnedSubTables(children []Node, ownerKeyPath []string, ownerPrefix stri
 				suffix := n.KeyPath[len(ownerKeyPath):]
 				subPrefix := buildArrayTablePath(ownerPrefix, suffix, idx)
 
-				if err := walkTableChildren(subPrefix, n.Children, fn); err != nil {
+				if err := walkTableChildren(subPrefix, n.Children, fn, mode); err != nil {
 					return err
 				}
 
@@ -180,7 +198,7 @@ func walkOwnedSubTables(children []Node, ownerKeyPath []string, ownerPrefix stri
 				}
 
 				if ownedEnd > ownedStart {
-					if err := walkOwnedSubTables(children[ownedStart:ownedEnd], n.KeyPath, subPrefix, fn); err != nil {
+					if err := walkOwnedSubTables(children[ownedStart:ownedEnd], n.KeyPath, subPrefix, fn, mode); err != nil {
 						return err
 					}
 				}
@@ -200,10 +218,10 @@ func walkOwnedSubTables(children []Node, ownerKeyPath []string, ownerPrefix stri
 
 // walkTableChildren walks the KV children of a table or array-table entry.
 // prefix is the dot-path prefix for all children.
-func walkTableChildren(prefix string, children []Node, fn func(string, Node) error) error {
+func walkTableChildren(prefix string, children []Node, fn func(string, Node) error, mode WalkMode) error {
 	for _, child := range children {
 		if kv, ok := child.(*KeyValueNode); ok {
-			if err := walkKV(prefix, kv, fn); err != nil {
+			if err := walkKV(prefix, kv, fn, mode); err != nil {
 				return err
 			}
 		}
@@ -213,26 +231,29 @@ func walkTableChildren(prefix string, children []Node, fn func(string, Node) err
 
 // walkKV walks a single key-value pair. If the value is an inline table or
 // array, it recurses into it. The prefix is prepended to the key parts.
-func walkKV(prefix string, kv *KeyValueNode, fn func(string, Node) error) error {
+func walkKV(prefix string, kv *KeyValueNode, fn func(string, Node) error, mode WalkMode) error {
 	fullPath := buildPathFromParts(prefix, kv.Key.Parts)
-	return walkValue(fullPath, kv.Val, fn)
+	return walkValue(fullPath, kv.Val, fn, mode)
 }
 
 // walkValue visits a value node. Scalars are yielded directly. Inline tables
-// and arrays are recursed into.
-func walkValue(path string, node Node, fn func(string, Node) error) error {
+// and arrays are recursed into. In WalkLeaves mode, containers are not
+// yielded to fn but their children are still recursed into.
+func walkValue(path string, node Node, fn func(string, Node) error, mode WalkMode) error {
 	switch v := node.(type) {
 	case *InlineTableNode:
-		err := fn(path, v)
-		if err != nil {
-			if errors.Is(err, SkipTable) {
-				return nil
+		if mode == WalkAll {
+			err := fn(path, v)
+			if err != nil {
+				if errors.Is(err, SkipTable) {
+					return nil
+				}
+				return err
 			}
-			return err
 		}
 		for _, child := range v.Children {
 			if kv, ok := child.(*KeyValueNode); ok {
-				if err := walkKV(path, kv, fn); err != nil {
+				if err := walkKV(path, kv, fn, mode); err != nil {
 					return err
 				}
 			}
@@ -240,16 +261,18 @@ func walkValue(path string, node Node, fn func(string, Node) error) error {
 		return nil
 
 	case *ArrayNode:
-		err := fn(path, v)
-		if err != nil {
-			if errors.Is(err, SkipTable) {
-				return nil
+		if mode == WalkAll {
+			err := fn(path, v)
+			if err != nil {
+				if errors.Is(err, SkipTable) {
+					return nil
+				}
+				return err
 			}
-			return err
 		}
 		for i, elem := range v.Elements {
 			elemPath := fmt.Sprintf("%s[%d]", path, i)
-			if err := walkValue(elemPath, elem, fn); err != nil {
+			if err := walkValue(elemPath, elem, fn, mode); err != nil {
 				return err
 			}
 		}

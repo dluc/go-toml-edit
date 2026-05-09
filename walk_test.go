@@ -21,7 +21,7 @@ func collectPaths(t *testing.T, doc *DocumentNode) []string {
 	err := doc.Walk(func(path string, node Node) error {
 		paths = append(paths, path)
 		return nil
-	})
+	}, WalkAll)
 	if err != nil {
 		t.Fatalf("Walk returned error: %v", err)
 	}
@@ -39,7 +39,7 @@ func collectPathNodes(t *testing.T, doc *DocumentNode) []pathNode {
 	err := doc.Walk(func(path string, node Node) error {
 		result = append(result, pathNode{path: path, node: node})
 		return nil
-	})
+	}, WalkAll)
 	if err != nil {
 		t.Fatalf("Walk returned error: %v", err)
 	}
@@ -234,7 +234,7 @@ name = "mydb"
 		}
 		paths = append(paths, path)
 		return nil
-	})
+	}, WalkAll)
 	if err != nil {
 		t.Fatalf("Walk returned error: %v", err)
 	}
@@ -268,7 +268,7 @@ other = "yes"`)
 		}
 		paths = append(paths, path)
 		return nil
-	})
+	}, WalkAll)
 	if err != nil {
 		t.Fatalf("Walk returned error: %v", err)
 	}
@@ -297,7 +297,7 @@ c = 3
 			return myErr
 		}
 		return nil
-	})
+	}, WalkAll)
 	if !errors.Is(err, myErr) {
 		t.Fatalf("expected myErr, got %v", err)
 	}
