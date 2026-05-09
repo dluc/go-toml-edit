@@ -33,26 +33,158 @@ func (d *DocumentNode) Walk(fn func(path string, node Node) error) error {
 	}
 
 	// Phase 2: tables and array-of-tables in document order.
-	// Array-of-tables need index tracking per key-path.
-	arrayCounters := map[string]int{} // key-path string -> next index
+	// Group children by ownership: sub-tables belong to the most recently
+	// preceding array-table entry whose KeyPath is a prefix of theirs.
+	// This handles both sub-table path prefixing (Bug 2) and per-entry
+	// counter reset for nested array-of-tables (Bug 3).
 
-	for _, child := range d.Children {
+	// Walk the document children, identifying top-level table groups.
+	// A child is "owned" by an array-table entry if its KeyPath starts with
+	// that entry's KeyPath and it appears between that entry and the next
+	// entry with the same KeyPath.
+	if err := walkDocumentTables(d.Children, fn); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// walkDocumentTables processes all TableNode and ArrayTableNode children of
+// the document, grouping sub-tables under their owning array-table entries.
+func walkDocumentTables(children []Node, fn func(string, Node) error) error {
+	// Global counters for top-level array-of-tables (those not owned by
+	// another array-table entry).
+	arrayCounters := map[string]int{}
+
+	i := 0
+	for i < len(children) {
+		child := children[i]
 		switch n := child.(type) {
-		case *TableNode:
-			prefix := buildPathFromParts("", n.KeyPath)
-			if err := walkTableChildren(prefix, n.Children, fn); err != nil {
-				return err
-			}
-
 		case *ArrayTableNode:
+			// This is a top-level array-of-tables entry.
+			// Collect all children owned by this entry (until the next entry
+			// with the same KeyPath).
 			counterKey := joinKeyPath(n.KeyPath)
 			idx := arrayCounters[counterKey]
 			arrayCounters[counterKey] = idx + 1
 
 			prefix := buildArrayTablePath("", n.KeyPath, idx)
+
+			// Walk the entry's own KV children.
 			if err := walkTableChildren(prefix, n.Children, fn); err != nil {
 				return err
 			}
+
+			// Collect owned sub-tables: scan forward until the next entry
+			// with the same KeyPath.
+			ownedStart := i + 1
+			ownedEnd := ownedStart
+			for ownedEnd < len(children) {
+				oc := children[ownedEnd]
+				if at, ok := oc.(*ArrayTableNode); ok {
+					if pathsEqual(at.KeyPath, n.KeyPath) {
+						break // next entry of the same array-of-tables
+					}
+				}
+				ownedEnd++
+			}
+
+			// Walk owned sub-tables with the array-table prefix.
+			if err := walkOwnedSubTables(children[ownedStart:ownedEnd], n.KeyPath, prefix, fn); err != nil {
+				return err
+			}
+
+			i = ownedEnd
+
+		case *TableNode:
+			// A top-level table (not owned by any array-table).
+			// Check if it's owned by a preceding array-table entry -- but
+			// since we process in order and array-table entries consume their
+			// owned children, any TableNode we see here is truly top-level.
+			prefix := buildPathFromParts("", n.KeyPath)
+			if err := walkTableChildren(prefix, n.Children, fn); err != nil {
+				return err
+			}
+			i++
+
+		default:
+			i++
+		}
+	}
+
+	return nil
+}
+
+// walkOwnedSubTables walks TableNode and ArrayTableNode children that belong
+// to a specific array-table entry. ownerKeyPath is the KeyPath of the owning
+// array-table, and ownerPrefix is the resolved path prefix (e.g. "products[0]").
+func walkOwnedSubTables(children []Node, ownerKeyPath []string, ownerPrefix string, fn func(string, Node) error) error {
+	// Per-entry counters for nested array-of-tables (reset per parent entry).
+	arrayCounters := map[string]int{}
+
+	i := 0
+	for i < len(children) {
+		child := children[i]
+		switch n := child.(type) {
+		case *TableNode:
+			// Sub-table of the array-table entry.
+			// Its KeyPath starts with ownerKeyPath; strip that prefix and
+			// append the remainder to ownerPrefix.
+			if hasPrefix(n.KeyPath, ownerKeyPath) {
+				suffix := n.KeyPath[len(ownerKeyPath):]
+				subPrefix := buildPathFromParts(ownerPrefix, suffix)
+				if err := walkTableChildren(subPrefix, n.Children, fn); err != nil {
+					return err
+				}
+			}
+			i++
+
+		case *ArrayTableNode:
+			// Nested array-of-tables within this entry.
+			if hasPrefix(n.KeyPath, ownerKeyPath) {
+				counterKey := joinKeyPath(n.KeyPath)
+				idx := arrayCounters[counterKey]
+				arrayCounters[counterKey] = idx + 1
+
+				suffix := n.KeyPath[len(ownerKeyPath):]
+				subPrefix := buildArrayTablePath(ownerPrefix, suffix, idx)
+
+				if err := walkTableChildren(subPrefix, n.Children, fn); err != nil {
+					return err
+				}
+
+				// Collect sub-tables owned by this nested array-table entry.
+				ownedStart := i + 1
+				ownedEnd := ownedStart
+				for ownedEnd < len(children) {
+					oc := children[ownedEnd]
+					if at, ok := oc.(*ArrayTableNode); ok {
+						if pathsEqual(at.KeyPath, n.KeyPath) {
+							break // next entry of the same nested array-of-tables
+						}
+						// Also stop if we hit another entry of the parent
+						// array-of-tables (shouldn't happen since we're already
+						// scoped, but be safe).
+						if pathsEqual(at.KeyPath, ownerKeyPath) {
+							break
+						}
+					}
+					ownedEnd++
+				}
+
+				if ownedEnd > ownedStart {
+					if err := walkOwnedSubTables(children[ownedStart:ownedEnd], n.KeyPath, subPrefix, fn); err != nil {
+						return err
+					}
+				}
+
+				i = ownedEnd
+			} else {
+				i++
+			}
+
+		default:
+			i++
 		}
 	}
 
