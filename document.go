@@ -325,48 +325,33 @@ func unwrapKV(kv *KeyValueNode) Node {
 // dotted key like a.b.c = val. When someone looks up "a", they get a view
 // pointing at part index 1; looking up "b" advances to index 2, etc.
 type dottedKeyView struct {
+	nullNode
 	kv        *KeyValueNode
 	partIndex int
 	doc       *DocumentNode
 }
 
-func (d *dottedKeyView) Type() NodeType          { return NodeKeyValue }
-func (d *dottedKeyView) Value() any              { return d.kv.Val }
-func (d *dottedKeyView) Comment() string         { return "" }
-func (d *dottedKeyView) SetComment(string)       {}
-func (d *dottedKeyView) LeadingComments() []string { return nil }
-func (d *dottedKeyView) SetLeadingComments([]string) {}
-func (d *dottedKeyView) Raw() []byte             { return nil }
-func (d *dottedKeyView) setRaw([]byte)           {}
-func (d *dottedKeyView) isDirty() bool           { return false }
-func (d *dottedKeyView) markDirty()              {}
-func (d *dottedKeyView) trivia() *Trivia         { return &Trivia{} }
+func (d *dottedKeyView) Type() NodeType { return NodeKeyValue }
+func (d *dottedKeyView) Value() any     { return d.kv.Val }
 
 // dottedKeyGroup groups multiple KeyValueNodes that share a common dotted-key
 // prefix. For example, "database.host" and "database.port" both share the
 // prefix "database" at depth 0. This acts as a virtual table for resolution.
 type dottedKeyGroup struct {
+	nullNode
 	kvs   []*KeyValueNode
 	depth int // how many leading parts have been consumed
 	doc   *DocumentNode
 }
 
-func (g *dottedKeyGroup) Type() NodeType            { return NodeTable }
-func (g *dottedKeyGroup) Value() any                { return g.kvs }
-func (g *dottedKeyGroup) Comment() string           { return "" }
-func (g *dottedKeyGroup) SetComment(string)         {}
-func (g *dottedKeyGroup) LeadingComments() []string { return nil }
-func (g *dottedKeyGroup) SetLeadingComments([]string) {}
-func (g *dottedKeyGroup) Raw() []byte               { return nil }
-func (g *dottedKeyGroup) setRaw([]byte)             {}
-func (g *dottedKeyGroup) isDirty() bool             { return false }
-func (g *dottedKeyGroup) markDirty()                {}
-func (g *dottedKeyGroup) trivia() *Trivia           { return &Trivia{} }
+func (g *dottedKeyGroup) Type() NodeType { return NodeTable }
+func (g *dottedKeyGroup) Value() any     { return g.kvs }
 
 // compoundTableView is a virtual node representing an implicit intermediate
 // table created by a compound KeyPath like [a.b.c]. When resolving "a", we
 // create this view; resolving "b" in it will match the remaining KeyPath.
 type compoundTableView struct {
+	nullNode
 	doc       *DocumentNode
 	prefix    []string // the path segments consumed so far
 	// The tables/array-tables whose KeyPaths start with this prefix
@@ -376,36 +361,19 @@ type compoundTableView struct {
 	kvs        []*KeyValueNode
 }
 
-func (c *compoundTableView) Type() NodeType            { return NodeTable }
-func (c *compoundTableView) Value() any                { return nil }
-func (c *compoundTableView) Comment() string           { return "" }
-func (c *compoundTableView) SetComment(string)         {}
-func (c *compoundTableView) LeadingComments() []string { return nil }
-func (c *compoundTableView) SetLeadingComments([]string) {}
-func (c *compoundTableView) Raw() []byte               { return nil }
-func (c *compoundTableView) setRaw([]byte)             {}
-func (c *compoundTableView) isDirty() bool             { return false }
-func (c *compoundTableView) markDirty()                {}
-func (c *compoundTableView) trivia() *Trivia           { return &Trivia{} }
+func (c *compoundTableView) Type() NodeType { return NodeTable }
+func (c *compoundTableView) Value() any     { return nil }
 
 // arrayTableCollection groups all ArrayTableNodes with the same KeyPath
 // so they can be indexed. It is not a real AST node.
 type arrayTableCollection struct {
+	nullNode
 	entries []*ArrayTableNode
 	doc     *DocumentNode
 }
 
-func (a *arrayTableCollection) Type() NodeType          { return NodeArrayTable }
-func (a *arrayTableCollection) Value() any              { return a.entries }
-func (a *arrayTableCollection) Comment() string         { return "" }
-func (a *arrayTableCollection) SetComment(string)       {}
-func (a *arrayTableCollection) LeadingComments() []string { return nil }
-func (a *arrayTableCollection) SetLeadingComments([]string) {}
-func (a *arrayTableCollection) Raw() []byte             { return nil }
-func (a *arrayTableCollection) setRaw([]byte)           {}
-func (a *arrayTableCollection) isDirty() bool           { return false }
-func (a *arrayTableCollection) markDirty()              {}
-func (a *arrayTableCollection) trivia() *Trivia         { return &Trivia{} }
+func (a *arrayTableCollection) Type() NodeType { return NodeArrayTable }
+func (a *arrayTableCollection) Value() any     { return a.entries }
 
 // pathsEqual returns true if two string slices are equal.
 func pathsEqual(a, b []string) bool {
