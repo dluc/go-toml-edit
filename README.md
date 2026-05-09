@@ -118,7 +118,7 @@ formatted := doc.Format(tomledit.WithIndentWidth(2))
 doc.Walk(func(path string, node tomledit.Node) error {
 	fmt.Printf("%s = %v\n", path, node.Value())
 	return nil
-})
+}, tomledit.WalkLeaves)
 ```
 
 ### Diff
