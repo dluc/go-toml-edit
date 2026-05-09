@@ -56,7 +56,7 @@ Estimated effort: 100-200 LOC source, 200-300 LOC tests.
 
 ## Should-have for credibility
 
-### 5. Comprehensive README
+### 4. Comprehensive README
 
 A published library needs a README that:
 - Shows the problem (round-trip destroys comments with existing libraries)
@@ -66,21 +66,21 @@ A published library needs a README that:
 - Links to pkg.go.dev documentation
 - Shows benchmark results vs pelletier/go-toml/v2
 
-### 6. License
+### 5. License
 
 Currently TBD. Pick and add a LICENSE file. MIT is standard for Go libraries.
 
-### 7. CI/CD via rlsbl scaffold
+### 6. CI/CD via rlsbl scaffold
 
 Scaffold CI workflows for the project. Since this is a Go library (no `package main`), rlsbl will skip GoReleaser and set up CI-only workflows.
 
-### 8. godoc comments on all exported types and functions
+### 7. godoc comments on all exported types and functions
 
 pkg.go.dev renders godoc. Every exported symbol needs a doc comment. Audit all exported types, functions, methods, and constants.
 
 ## Nice-to-have
 
-### 9. SetComment / comment manipulation helpers
+### 8. SetComment / comment manipulation helpers
 
 The Node interface has `SetComment` and `SetLeadingComments`, but there's no path-based convenience for adding or modifying comments:
 
@@ -89,7 +89,7 @@ func (d *Document) SetComment(path string, comment string) error
 func (d *Document) SetLeadingComments(path string, comments []string) error
 ```
 
-### 10. Walk / visitor
+### 9. Walk / visitor
 
 Generic tree traversal for consumers who need to process every node:
 
@@ -97,7 +97,7 @@ Generic tree traversal for consumers who need to process every node:
 func (d *Document) Walk(fn func(path string, node Node) error) error
 ```
 
-### 11. Diff
+### 10. Diff
 
 Compare two documents and report which paths differ:
 
@@ -107,7 +107,7 @@ func Diff(a, b *Document) []Change
 
 Useful for testing and debugging.
 
-### 12. Benchmark comparison README section
+### 11. Benchmark comparison README section
 
 Run benchmarks against pelletier/go-toml/v2 and BurntSushi/toml. Include results in README. The editing features are the differentiator, but parse/decode performance should be competitive enough not to deter adoption.
 
