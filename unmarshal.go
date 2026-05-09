@@ -62,6 +62,9 @@ func (dec *decoder) decodeDocument(doc *DocumentNode, rv reflect.Value) error {
 func (dec *decoder) decodeDocumentToStruct(doc *DocumentNode, rv reflect.Value) error {
 	fm := newFieldMapping(rv.Type())
 
+	// Collect top-level array-table paths so we can skip their sub-tables.
+	arrayTablePaths := collectArrayTablePaths(doc)
+
 	for _, child := range doc.Children {
 		switch n := child.(type) {
 		case *CommentNode:
@@ -71,10 +74,20 @@ func (dec *decoder) decodeDocumentToStruct(doc *DocumentNode, rv reflect.Value) 
 				return err
 			}
 		case *TableNode:
+			// Skip TableNode entries that are sub-tables of an array-of-tables.
+			// These are handled by decodeArrayTableSubTables when processing the parent.
+			if isSubTableOfArrayTable(n.KeyPath, arrayTablePaths) {
+				continue
+			}
 			if err := dec.decodeTableNodeIntoStruct(doc, n, fm, rv); err != nil {
 				return err
 			}
 		case *ArrayTableNode:
+			// Skip sub-array-tables (multi-component KeyPath); they are handled
+			// by decodeArrayTableSubTables when processing their parent.
+			if len(n.KeyPath) > 1 {
+				continue
+			}
 			if err := dec.decodeArrayTableNodeIntoStruct(doc, n, fm, rv); err != nil {
 				return err
 			}
@@ -89,6 +102,10 @@ func (dec *decoder) decodeDocumentToMap(doc *DocumentNode, rv reflect.Value) err
 		rv.Set(reflect.MakeMap(rv.Type()))
 	}
 	arraySlices := map[string][]any{}
+
+	// Collect top-level array-table paths so we can skip their sub-tables.
+	arrayTablePaths := collectArrayTablePaths(doc)
+
 	for _, child := range doc.Children {
 		switch n := child.(type) {
 		case *CommentNode:
@@ -98,10 +115,20 @@ func (dec *decoder) decodeDocumentToMap(doc *DocumentNode, rv reflect.Value) err
 				return err
 			}
 		case *TableNode:
+			// Skip TableNode entries that are sub-tables of an array-of-tables.
+			// These are handled by decodeArrayTableSubTablesIntoMap.
+			if isSubTableOfArrayTable(n.KeyPath, arrayTablePaths) {
+				continue
+			}
 			if err := dec.decodeTableNodeIntoMap(doc, n, rv); err != nil {
 				return err
 			}
 		case *ArrayTableNode:
+			// Skip sub-array-tables (multi-component KeyPath); they are handled
+			// by decodeArrayTableSubTablesIntoMap when processing their parent.
+			if len(n.KeyPath) > 1 {
+				continue
+			}
 			if err := dec.decodeArrayTableNodeIntoMap(doc, n, rv, arraySlices); err != nil {
 				return err
 			}
@@ -182,8 +209,14 @@ func collectFields(t reflect.Type, indexPrefix []int, exact map[string]structFie
 }
 
 // lookup finds the struct field for a given TOML key name.
+// It tries an exact match first, then falls back to case-insensitive matching.
 func (fm *fieldMapping) lookup(name string) (structField, bool) {
 	sf, ok := fm.fields[name]
+	if ok {
+		return sf, true
+	}
+	// Case-insensitive fallback: the map contains lowercase keys as fallbacks.
+	sf, ok = fm.fields[strings.ToLower(name)]
 	return sf, ok
 }
 
@@ -232,7 +265,7 @@ func (dec *decoder) decodeKVIntoStruct(kv *KeyValueNode, fm *fieldMapping, rv re
 				current = fv
 				currentFM = newFieldMapping(fv.Type())
 			case reflect.Map:
-				return dec.decodeDottedKVIntoMap(kv, parts[i:], fv, currentPath)
+				return dec.decodeDottedKVIntoMap(kv, parts[i+1:], fv, currentPath)
 			case reflect.Interface:
 				if fv.IsNil() {
 					m := make(map[string]any)
@@ -240,7 +273,7 @@ func (dec *decoder) decodeKVIntoStruct(kv *KeyValueNode, fm *fieldMapping, rv re
 				}
 				inner := fv.Elem()
 				if inner.Kind() == reflect.Map {
-					return dec.decodeDottedKVIntoMap(kv, parts[i:], inner, currentPath)
+					return dec.decodeDottedKVIntoMap(kv, parts[i+1:], inner, currentPath)
 				}
 				return fmt.Errorf("toml: cannot decode dotted key into %s at %q", fv.Type(), currentPath)
 			default:
@@ -259,6 +292,9 @@ func (dec *decoder) decodeKVIntoMap(kv *KeyValueNode, rv reflect.Value, pathPref
 	parts := kv.Key.Parts
 	if len(parts) == 0 {
 		return nil
+	}
+	if rv.Type().Key().Kind() != reflect.String {
+		return fmt.Errorf("toml: cannot decode into map with non-string key type %s", rv.Type().Key())
 	}
 	if rv.IsNil() {
 		rv.Set(reflect.MakeMap(rv.Type()))
@@ -1093,4 +1129,37 @@ func parseTag(tag string) (string, string) {
 		return tag[:idx], tag[idx+1:]
 	}
 	return tag, ""
+}
+
+// collectArrayTablePaths returns the set of single-component array-table KeyPaths
+// found in the document. These are used to identify sub-tables that should be
+// skipped by the top-level loop (they are handled within array-table processing).
+func collectArrayTablePaths(doc *DocumentNode) [][]string {
+	var paths [][]string
+	seen := map[string]bool{}
+	for _, child := range doc.Children {
+		if at, ok := child.(*ArrayTableNode); ok {
+			// Only track single-component paths as "top-level" array tables.
+			// Multi-component paths (e.g., ["products","tags"]) are sub-arrays.
+			if len(at.KeyPath) == 1 {
+				key := at.KeyPath[0]
+				if !seen[key] {
+					seen[key] = true
+					paths = append(paths, at.KeyPath)
+				}
+			}
+		}
+	}
+	return paths
+}
+
+// isSubTableOfArrayTable returns true if keyPath is a sub-table of any array-table path,
+// i.e., keyPath has the array-table path as a prefix and is longer.
+func isSubTableOfArrayTable(keyPath []string, arrayTablePaths [][]string) bool {
+	for _, atp := range arrayTablePaths {
+		if hasPrefix(keyPath, atp) && len(keyPath) > len(atp) {
+			return true
+		}
+	}
+	return false
 }
