@@ -206,10 +206,33 @@ func formatValue(buf *bytes.Buffer, n Node, cfg *FormatConfig, prefixLen int, in
 	}
 }
 
+// arrayHasComments returns true if any element has leading or inline comments,
+// or if the array has trailing comments. Arrays with comments must be rendered
+// in multi-line format since TOML inline arrays cannot contain comments.
+func arrayHasComments(arr *ArrayNode) bool {
+	if len(arr.TrailingComments) > 0 {
+		return true
+	}
+	for _, elem := range arr.Elements {
+		t := elem.trivia()
+		if len(t.LeadingComments) > 0 || len(t.InlineComment) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // formatArray formats an array, choosing inline or multi-line based on LineWidth.
 func formatArray(buf *bytes.Buffer, arr *ArrayNode, cfg *FormatConfig, prefixLen int, indentLevel int) {
 	if len(arr.Elements) == 0 {
 		buf.WriteString("[]")
+		return
+	}
+
+	// Arrays with comments must be multi-line (TOML inline arrays cannot
+	// contain comments).
+	if arrayHasComments(arr) {
+		formatArrayMultiLine(buf, arr, cfg, indentLevel)
 		return
 	}
 
@@ -240,15 +263,54 @@ func formatArrayInline(arr *ArrayNode, cfg *FormatConfig) []byte {
 }
 
 // formatArrayMultiLine renders an array with one element per line, including
-// a trailing comma on the last element.
+// a trailing comma on the last element. It preserves leading comments,
+// inline comments on elements, and trailing comments on the array.
 func formatArrayMultiLine(buf *bytes.Buffer, arr *ArrayNode, cfg *FormatConfig, indentLevel int) {
 	buf.WriteString("[\n")
 	elemIndent := indentLevel + 1
 	for _, elem := range arr.Elements {
+		// Leading comments for this element.
+		t := elem.trivia()
+		for _, c := range t.LeadingComments {
+			writeIndent(buf, cfg, elemIndent)
+			line := strings.TrimRight(string(c), " \t\r\n")
+			if line != "" {
+				buf.WriteString(line)
+			}
+			buf.WriteByte('\n')
+		}
+
 		writeIndent(buf, cfg, elemIndent)
 		formatValue(buf, elem, cfg, elemIndent*cfg.IndentWidth, elemIndent)
-		buf.WriteString(",\n")
+		buf.WriteByte(',')
+
+		// Inline comment on this element.
+		if len(t.InlineComment) > 0 {
+			comment := strings.TrimRight(string(t.InlineComment), " \t\r\n")
+			if comment != "" {
+				if comment[0] == '#' {
+					buf.WriteString("  ")
+					buf.WriteString(comment)
+				} else {
+					buf.WriteString("  # ")
+					buf.WriteString(comment)
+				}
+			}
+		}
+
+		buf.WriteByte('\n')
 	}
+
+	// Trailing comments (after last element, before ']').
+	for _, c := range arr.TrailingComments {
+		writeIndent(buf, cfg, elemIndent)
+		line := strings.TrimRight(string(c), " \t\r\n")
+		if line != "" {
+			buf.WriteString(line)
+		}
+		buf.WriteByte('\n')
+	}
+
 	writeIndent(buf, cfg, indentLevel)
 	buf.WriteByte(']')
 }
