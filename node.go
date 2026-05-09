@@ -62,12 +62,12 @@ type Node interface {
 	Type() NodeType
 	Value() any
 	Comment() string
-	SetComment(comment string)
 	LeadingComments() []string
-	SetLeadingComments(comments []string)
 	Raw() []byte
 
 	// unexported methods restrict implementation to this package
+	setComment(comment string)
+	setLeadingComments(comments []string)
 	setRaw([]byte)
 	isDirty() bool
 	markDirty()
@@ -110,6 +110,10 @@ func (n *nodeBase) SetComment(comment string) {
 	n.dirty = true
 }
 
+func (n *nodeBase) setComment(comment string) {
+	n.SetComment(comment)
+}
+
 func (n *nodeBase) LeadingComments() []string {
 	result := make([]string, len(n.nodeTrivia.LeadingComments))
 	for i, c := range n.nodeTrivia.LeadingComments {
@@ -126,6 +130,10 @@ func (n *nodeBase) SetLeadingComments(comments []string) {
 	n.dirty = true
 }
 
+func (n *nodeBase) setLeadingComments(comments []string) {
+	n.SetLeadingComments(comments)
+}
+
 // nullNode provides no-op implementations of all Node interface methods.
 // Internal virtual node types (dottedKeyView, dottedKeyGroup,
 // compoundTableView, arrayTableCollection) embed nullNode and override
@@ -136,8 +144,10 @@ func (nullNode) Type() NodeType              { return NodeType(-1) }
 func (nullNode) Value() any                  { return nil }
 func (nullNode) Comment() string             { return "" }
 func (nullNode) SetComment(string)           {}
+func (nullNode) setComment(string)           {}
 func (nullNode) LeadingComments() []string   { return nil }
 func (nullNode) SetLeadingComments([]string) {}
+func (nullNode) setLeadingComments([]string) {}
 func (nullNode) Raw() []byte                 { return nil }
 func (nullNode) setRaw([]byte)               {}
 func (nullNode) isDirty() bool               { return false }
