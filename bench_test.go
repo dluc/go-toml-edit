@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"fmt"
 	"testing"
+
+	burntsushi "github.com/BurntSushi/toml"
 )
 
 var benchInput = []byte(`# Application config
@@ -94,5 +96,76 @@ func BenchmarkParseLarge(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, _ = Parse(input)
+	}
+}
+
+// Shared struct for unmarshal benchmarks (matches benchInput TOML).
+type benchConfig struct {
+	Server struct {
+		Host     string
+		Port     int
+		Debug    bool
+		Database struct {
+			Host            string `toml:"host"`
+			Port            int    `toml:"port"`
+			Name            string `toml:"name"`
+			Max_connections int    `toml:"max_connections"`
+		} `toml:"database"`
+	} `toml:"server"`
+	Products []struct {
+		Name  string   `toml:"name"`
+		Price float64  `toml:"price"`
+		Tags  []string `toml:"tags"`
+	} `toml:"products"`
+	Metadata struct {
+		Created interface{} `toml:"created"`
+		Version string      `toml:"version"`
+	} `toml:"metadata"`
+}
+
+func BenchmarkUnmarshal(b *testing.B) {
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		var cfg benchConfig
+		if err := Unmarshal(benchInput, &cfg); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkBurntSushiParse(b *testing.B) {
+	s := string(benchInput)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		var m map[string]any
+		if _, err := burntsushi.Decode(s, &m); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkBurntSushiUnmarshal(b *testing.B) {
+	s := string(benchInput)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		var cfg benchConfig
+		if _, err := burntsushi.Decode(s, &cfg); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkBurntSushiParseLarge(b *testing.B) {
+	var buf bytes.Buffer
+	for i := 0; i < 100; i++ {
+		fmt.Fprintf(&buf, "[[items]]\nname = \"item_%d\"\nvalue = %d\nenabled = %v\n\n", i, i*100, i%2 == 0)
+	}
+	s := buf.String()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		var m map[string]any
+		if _, err := burntsushi.Decode(s, &m); err != nil {
+			b.Fatal(err)
+		}
 	}
 }

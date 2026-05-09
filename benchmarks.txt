@@ -1,0 +1,36 @@
+goos: linux
+goarch: amd64
+pkg: github.com/smm-h/go-toml-edit
+cpu: 13th Gen Intel(R) Core(TM) i7-13620H
+BenchmarkParse-16                   	   75999	     16134 ns/op	   30808 B/op	     320 allocs/op
+BenchmarkParse-16                   	   75074	     15713 ns/op	   30808 B/op	     320 allocs/op
+BenchmarkParse-16                   	   73946	     15775 ns/op	   30808 B/op	     320 allocs/op
+BenchmarkBytes-16                   	 1644684	       734.7 ns/op	    2152 B/op	      20 allocs/op
+BenchmarkBytes-16                   	 1665840	       728.2 ns/op	    2152 B/op	      20 allocs/op
+BenchmarkBytes-16                   	 1625883	       722.3 ns/op	    2152 B/op	      20 allocs/op
+BenchmarkGet-16                     	 1900432	       634.0 ns/op	     432 B/op	      16 allocs/op
+BenchmarkGet-16                     	 1945608	       615.6 ns/op	     432 B/op	      16 allocs/op
+BenchmarkGet-16                     	 1937463	       621.1 ns/op	     432 B/op	      16 allocs/op
+BenchmarkSetExisting-16             	   64357	     18467 ns/op	   33433 B/op	     356 allocs/op
+BenchmarkSetExisting-16             	   64400	     18009 ns/op	   33433 B/op	     356 allocs/op
+BenchmarkSetExisting-16             	   66931	     17374 ns/op	   33433 B/op	     356 allocs/op
+BenchmarkFormat-16                  	  413904	      2582 ns/op	    1736 B/op	      73 allocs/op
+BenchmarkFormat-16                  	  474782	      2535 ns/op	    1736 B/op	      73 allocs/op
+BenchmarkFormat-16                  	  468848	      2543 ns/op	    1736 B/op	      73 allocs/op
+BenchmarkParseLarge-16              	    4162	    275269 ns/op	  595115 B/op	    5613 allocs/op
+BenchmarkParseLarge-16              	    4261	    275013 ns/op	  595115 B/op	    5613 allocs/op
+BenchmarkParseLarge-16              	    4558	    273510 ns/op	  595115 B/op	    5613 allocs/op
+BenchmarkUnmarshal-16               	   50847	     24946 ns/op	   37075 B/op	     439 allocs/op
+BenchmarkUnmarshal-16               	   50746	     24553 ns/op	   37075 B/op	     439 allocs/op
+BenchmarkUnmarshal-16               	   49597	     23939 ns/op	   37075 B/op	     439 allocs/op
+BenchmarkBurntSushiParse-16         	   66394	     17929 ns/op	   15400 B/op	     173 allocs/op
+BenchmarkBurntSushiParse-16         	   64327	     18533 ns/op	   15400 B/op	     173 allocs/op
+BenchmarkBurntSushiParse-16         	   64656	     18103 ns/op	   15400 B/op	     173 allocs/op
+BenchmarkBurntSushiUnmarshal-16     	   55128	     21817 ns/op	   17528 B/op	     229 allocs/op
+BenchmarkBurntSushiUnmarshal-16     	   55195	     21918 ns/op	   17528 B/op	     229 allocs/op
+BenchmarkBurntSushiUnmarshal-16     	   53952	     21792 ns/op	   17528 B/op	     229 allocs/op
+BenchmarkBurntSushiParseLarge-16    	    4506	    245993 ns/op	  171464 B/op	    2245 allocs/op
+BenchmarkBurntSushiParseLarge-16    	    4838	    247345 ns/op	  171464 B/op	    2245 allocs/op
+BenchmarkBurntSushiParseLarge-16    	    5224	    246237 ns/op	  171464 B/op	    2245 allocs/op
+PASS
+ok  	github.com/smm-h/go-toml-edit	44.210s
