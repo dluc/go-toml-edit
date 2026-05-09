@@ -382,9 +382,14 @@ func renderKeyValue(n *KeyValueNode) []byte {
 	// Leading trivia
 	buf = append(buf, renderTrivia(n)...)
 
-	// Key: always re-render from parts for dirty KV to avoid trailing
-	// whitespace from the key's raw bytes leaking into the output.
-	buf = append(buf, renderKeyFromParts(n.Key)...)
+	// Key: if the key itself is clean, use renderKeyParts to preserve the
+	// original key formatting (e.g., literal-quoted 'host' stays literal).
+	// Only re-render from parts when the key is dirty.
+	if n.Key.isDirty() {
+		buf = append(buf, renderKeyFromParts(n.Key)...)
+	} else {
+		buf = append(buf, renderKeyParts(n.Key)...)
+	}
 	buf = append(buf, " = "...)
 
 	// Value

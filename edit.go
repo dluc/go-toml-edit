@@ -477,6 +477,7 @@ func renameKeyInParent(parent Node, oldKey, newKey string) error {
 				// Update the last matching part (for simple keys, index 0).
 				kv.Key.Parts[0] = newKey
 				kv.Key.RawParts[0] = []byte(newKey)
+				kv.Key.markDirty()
 				kv.markDirty()
 				return nil
 			}
