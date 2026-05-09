@@ -698,10 +698,14 @@ func (p *parser) parseArrayValue() (Node, error) {
 	arr := &ArrayNode{}
 
 	for {
-		// Skip whitespace, newlines, comments inside array
-		p.skipArrayTrivia()
+		// Collect leading trivia (whitespace, newlines, comments) before the
+		// next element or closing bracket.
+		leadingWS, leadingComments := p.collectArrayTrivia()
 
 		if p.peekType() == TokenRightBracket {
+			// Comments collected here belong after the last element (or are the
+			// only content in an empty array). Store them as trailing comments.
+			arr.TrailingComments = leadingComments
 			p.advance() // consume ]
 			arr.setRaw(p.rawFromTokenRange(startPos, p.pos))
 			return arr, nil
@@ -711,28 +715,57 @@ func (p *parser) parseArrayValue() (Node, error) {
 		if err != nil {
 			return nil, err
 		}
+
+		// Attach leading trivia to this element.
+		t := elem.trivia()
+		t.LeadingWhitespace = leadingWS
+		t.LeadingComments = leadingComments
+
 		arr.Elements = append(arr.Elements, elem)
 
-		// Skip trivia after element
-		p.skipArrayTrivia()
+		// After the value, there may be:
+		//   value, # comment    (comma first, then inline comment)
+		//   value # comment \n, (inline comment first, then comma on next line)
+		//   value,              (just comma)
+		//   value ]             (last element, no comma)
+		//   value # comment ]   (last element with comment)
+		//
+		// First, try to find comma or inline comment or ] by skipping whitespace.
+		p.skipArrayWhitespace()
 
-		if p.peekType() == TokenComma {
+		switch p.peekType() {
+		case TokenComma:
 			p.advance() // consume comma
+			// Inline comment after the comma on the same line.
+			_, inlineComment := p.collectArrayInlineTrivia()
+			if len(inlineComment) > 0 {
+				t.InlineComment = inlineComment
+			}
 			continue
-		}
 
-		// Must be ] or error
-		if p.peekType() == TokenRightBracket {
+		case TokenComment:
+			// Inline comment without a preceding comma (e.g., `2#,9\n,`).
+			_, inlineComment := p.collectArrayInlineTrivia()
+			if len(inlineComment) > 0 {
+				t.InlineComment = inlineComment
+			}
+			// After the comment, skip whitespace/newlines and look for comma or ].
+			p.skipArrayTrivia()
+			if p.peekType() == TokenComma {
+				p.advance()
+				continue
+			}
+			if p.peekType() == TokenRightBracket {
+				continue // will be consumed at top of loop
+			}
+			return nil, p.errorf("expected ',' or ']' in array, got %s", p.peekType())
+
+		case TokenRightBracket:
 			continue // will be consumed at top of loop
-		}
 
-		// Allow newline/whitespace/comment before ]
-		p.skipArrayTrivia()
-		if p.peekType() == TokenRightBracket {
-			continue
+		default:
+			return nil, p.errorf("expected ',' or ']' in array, got %s", p.peekType())
 		}
-
-		return nil, p.errorf("expected ',' or ']' in array, got %s", p.peekType())
 	}
 }
 
@@ -824,6 +857,80 @@ func (p *parser) skipArrayTrivia() {
 		}
 		break
 	}
+}
+
+// skipArrayWhitespace consumes whitespace and newlines (but NOT comments)
+// inside an array.
+func (p *parser) skipArrayWhitespace() {
+	for {
+		tt := p.peekType()
+		if tt == TokenWhitespace || tt == TokenNewline {
+			p.advance()
+			continue
+		}
+		break
+	}
+}
+
+// collectArrayTrivia collects whitespace, newlines, and comments before an
+// array element or closing bracket. It returns the final leading whitespace
+// (indentation before the element) and any full comment lines collected.
+func (p *parser) collectArrayTrivia() (leadingWS []byte, leadingComments [][]byte) {
+	var pendingWS []byte
+
+	for {
+		tt := p.peekType()
+		switch tt {
+		case TokenWhitespace:
+			tok := p.advance()
+			pendingWS = append(pendingWS, tok.Raw...)
+			continue
+
+		case TokenNewline:
+			tok := p.advance()
+			// Pending whitespace + newline is just a blank line; discard
+			// the whitespace (it's not comment content).
+			_ = tok
+			pendingWS = nil
+			continue
+
+		case TokenComment:
+			tok := p.advance()
+			// Build a comment line: indentation + comment text
+			commentLine := make([]byte, 0, len(pendingWS)+len(tok.Raw))
+			commentLine = append(commentLine, pendingWS...)
+			commentLine = append(commentLine, tok.Raw...)
+			pendingWS = nil
+
+			// Consume the newline after the comment if present.
+			if p.peekType() == TokenNewline {
+				nl := p.advance()
+				commentLine = append(commentLine, nl.Raw...)
+			}
+			leadingComments = append(leadingComments, commentLine)
+			continue
+
+		default:
+			// Not trivia. pendingWS is the leading whitespace (indentation)
+			// for the coming element.
+			leadingWS = pendingWS
+			return
+		}
+	}
+}
+
+// collectArrayInlineTrivia collects optional whitespace and a comment on the
+// same line after an array element value (before a comma or newline).
+func (p *parser) collectArrayInlineTrivia() (ws []byte, comment []byte) {
+	if p.peekType() == TokenWhitespace {
+		tok := p.advance()
+		ws = tok.Raw
+	}
+	if p.peekType() == TokenComment {
+		tok := p.advance()
+		comment = tok.Raw
+	}
+	return
 }
 
 func (p *parser) rawFromTokenRange(startIdx, endIdx int) []byte {

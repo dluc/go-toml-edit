@@ -236,6 +236,14 @@ func setIndexInParent(parent Node, index int, valNode Node) error {
 		if err != nil {
 			return err
 		}
+		// Transfer trivia (leading comments, leading whitespace, inline
+		// comment) from the old element to the new one so that comments
+		// on the replaced element survive re-rendering.
+		oldTrivia := p.Elements[idx].trivia()
+		newTrivia := valNode.trivia()
+		newTrivia.LeadingComments = oldTrivia.LeadingComments
+		newTrivia.LeadingWhitespace = oldTrivia.LeadingWhitespace
+		newTrivia.InlineComment = oldTrivia.InlineComment
 		p.Elements[idx] = valNode
 		p.markDirty()
 		return nil

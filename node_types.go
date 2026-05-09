@@ -149,7 +149,8 @@ func (n *LocalTimeNode) Value() any     { return n.Val }
 // ArrayNode represents an array value.
 type ArrayNode struct {
 	nodeBase
-	Elements []Node
+	Elements         []Node
+	TrailingComments [][]byte // comments after the last element, before ']'
 }
 
 func (n *ArrayNode) Type() NodeType { return NodeArray }

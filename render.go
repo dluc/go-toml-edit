@@ -338,16 +338,86 @@ func formatFractional(ns int) string {
 // renderArray renders an ArrayNode.
 func renderArray(n *ArrayNode) []byte {
 	if len(n.Elements) == 0 {
+		if len(n.TrailingComments) > 0 {
+			// Empty array with trailing comments -- render multiline.
+			var buf []byte
+			buf = append(buf, '[')
+			buf = append(buf, '\n')
+			for _, c := range n.TrailingComments {
+				buf = append(buf, c...)
+			}
+			buf = append(buf, ']')
+			return buf
+		}
 		return []byte("[]")
 	}
+
+	// Check whether any element carries trivia (leading comments or inline
+	// comment). If so, render in multiline format to preserve them.
+	multiline := len(n.TrailingComments) > 0
+	if !multiline {
+		for _, elem := range n.Elements {
+			t := elem.trivia()
+			if len(t.LeadingComments) > 0 || len(t.InlineComment) > 0 {
+				multiline = true
+				break
+			}
+		}
+	}
+
+	if !multiline {
+		var buf []byte
+		buf = append(buf, '[')
+		for i, elem := range n.Elements {
+			if i > 0 {
+				buf = append(buf, ", "...)
+			}
+			buf = append(buf, serializeNode(elem)...)
+		}
+		buf = append(buf, ']')
+		return buf
+	}
+
+	// Multiline format with comment preservation.
 	var buf []byte
 	buf = append(buf, '[')
+	buf = append(buf, '\n')
 	for i, elem := range n.Elements {
-		if i > 0 {
-			buf = append(buf, ", "...)
+		t := elem.trivia()
+
+		// Leading comments for this element.
+		for _, c := range t.LeadingComments {
+			buf = append(buf, c...)
 		}
+
+		// Leading whitespace (indentation).
+		if len(t.LeadingWhitespace) > 0 {
+			buf = append(buf, t.LeadingWhitespace...)
+		} else {
+			buf = append(buf, "    "...)
+		}
+
+		// The value itself.
 		buf = append(buf, serializeNode(elem)...)
+
+		// Trailing comma.
+		buf = append(buf, ',')
+
+		// Inline comment.
+		if len(t.InlineComment) > 0 {
+			buf = append(buf, ' ')
+			buf = append(buf, t.InlineComment...)
+		}
+
+		_ = i
+		buf = append(buf, '\n')
 	}
+
+	// Trailing comments (after last element, before ']').
+	for _, c := range n.TrailingComments {
+		buf = append(buf, c...)
+	}
+
 	buf = append(buf, ']')
 	return buf
 }
