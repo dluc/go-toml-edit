@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.2
+
+- Preserve intra-array comments in Format() output
+- Fix README Walk example to include required WalkMode parameter
+
 ## 0.1.1
 
 - Preserve comments between array elements when arrays are re-rendered
