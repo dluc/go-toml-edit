@@ -9,9 +9,12 @@ import (
 )
 
 // Bytes serializes the document back to TOML bytes.
+//
 // For clean documents (parsed and never modified), it returns the exact
-// original source bytes. For dirty nodes, it re-renders them from their
-// semantic values.
+// original source bytes (round-trip fidelity). For nodes that have been
+// modified via Set, Delete, or other editing operations, only the affected
+// nodes are re-rendered from their semantic values; unmodified nodes retain
+// their original formatting.
 func (d *DocumentNode) Bytes() []byte {
 	var buf []byte
 	for _, child := range d.Children {

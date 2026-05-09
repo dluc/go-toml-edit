@@ -4,22 +4,22 @@ package tomledit
 type NodeType int
 
 const (
-	NodeDocument NodeType = iota
-	NodeTable
-	NodeArrayTable
-	NodeKeyValue
-	NodeKey
-	NodeString
-	NodeInteger
-	NodeFloat
-	NodeBoolean
-	NodeDateTime
-	NodeLocalDateTime
-	NodeLocalDate
-	NodeLocalTime
-	NodeArray
-	NodeInlineTable
-	NodeComment
+	NodeDocument      NodeType = iota // NodeDocument is the root document node.
+	NodeTable                         // NodeTable is a [table] header node.
+	NodeArrayTable                    // NodeArrayTable is an [[array-table]] header node.
+	NodeKeyValue                      // NodeKeyValue is a key = value pair.
+	NodeKey                           // NodeKey is a (possibly dotted) key.
+	NodeString                        // NodeString is a string value.
+	NodeInteger                       // NodeInteger is an integer value.
+	NodeFloat                         // NodeFloat is a float value.
+	NodeBoolean                       // NodeBoolean is a boolean value.
+	NodeDateTime                      // NodeDateTime is an offset date-time value.
+	NodeLocalDateTime                 // NodeLocalDateTime is a local date-time value (no timezone).
+	NodeLocalDate                     // NodeLocalDate is a local date value.
+	NodeLocalTime                     // NodeLocalTime is a local time value.
+	NodeArray                         // NodeArray is an array value.
+	NodeInlineTable                   // NodeInlineTable is an inline table value.
+	NodeComment                       // NodeComment is a standalone comment line.
 )
 
 var nodeTypeNames = [...]string{
@@ -58,6 +58,9 @@ type Trivia struct {
 }
 
 // Node is the interface implemented by all AST nodes.
+// Every node carries its original raw bytes, trivia (whitespace and comments),
+// and a semantic value accessible via Value. Implementation is restricted to
+// this package.
 type Node interface {
 	Type() NodeType
 	Value() any

@@ -2,10 +2,12 @@ package tomledit
 
 import "fmt"
 
-// MergeDefaults recursively walks defaults and sets keys that don't exist in
+// MergeDefaults recursively walks defaults and sets keys that do not exist in
 // the document at the given path. If path is empty, merges at the document root.
-// Maps (map[string]any) merge recursively: only missing keys are set.
-// Scalars and arrays are atomic: existing keys are never overwritten.
+//
+// Maps (map[string]any) merge recursively: only missing keys are set. Scalars
+// and arrays are atomic: existing keys are never overwritten. This is useful
+// for applying default configuration values to a user-provided TOML file.
 func (d *DocumentNode) MergeDefaults(path string, defaults map[string]any) error {
 	return d.mergeMap(path, defaults)
 }
@@ -52,13 +54,17 @@ func (d *DocumentNode) mergeMap(prefix string, m map[string]any) error {
 	return nil
 }
 
-// Merge merges all values from other into d. Same recursive semantics as
-// MergeDefaults: only keys that don't exist in d are set.
+// Merge merges all values from the other document into d. Same recursive
+// semantics as MergeDefaults: only keys that do not exist in d are set;
+// existing values are never overwritten.
 //
 // Comment handling:
 //   - For existing keys: other's leading comments are appended to d's leading
 //     comments; if d has no inline comment and other does, it is copied.
 //   - For new keys: comments from other are brought along with the value.
+//
+// Array-of-tables are treated atomically: if d already has entries for a
+// given path, all of other's entries for that path are skipped.
 func (d *DocumentNode) Merge(other *DocumentNode) error {
 	return mergeChildren(d, other, other, "")
 }

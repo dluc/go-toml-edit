@@ -557,9 +557,14 @@ func resolveKeyInDottedView(doc *DocumentNode, view *dottedKeyView, key string) 
 
 // --- Public API methods on DocumentNode ---
 
-// Get parses the path string, resolves it against the document, and returns
-// the target node. For KeyValueNodes, the value node is returned. Returns nil
-// if the path is invalid or not found.
+// Get resolves the dot-separated path against the document and returns the
+// target node. For key-value pairs, the value node is returned (not the
+// KeyValueNode wrapper). Returns nil if the path is syntactically invalid or
+// the key is not found.
+//
+// Path syntax uses dots to separate keys (e.g. "server.host"), brackets for
+// array indices (e.g. "items[0]"), and supports negative indices (e.g. "items[-1]"
+// for the last element). Use Resolve for the same operation with error details.
 func (d *DocumentNode) Get(path string) Node {
 	segments, err := parsePath(path)
 	if err != nil {
@@ -572,9 +577,10 @@ func (d *DocumentNode) Get(path string) Node {
 	return node
 }
 
-// Resolve parses the path string, resolves it against the document, and returns
-// the target node. Unlike Get, it returns proper errors for both path syntax
-// errors and resolution failures.
+// Resolve resolves the dot-separated path against the document and returns the
+// target node. Unlike Get, it returns descriptive errors for both path syntax
+// errors and resolution failures, making it suitable for cases where the caller
+// needs to distinguish "not found" from "invalid path".
 func (d *DocumentNode) Resolve(path string) (Node, error) {
 	segments, err := parsePath(path)
 	if err != nil {

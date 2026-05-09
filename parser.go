@@ -10,7 +10,13 @@ import (
 )
 
 // Parse lexes and parses TOML source bytes into a DocumentNode AST.
-// It returns a ParseError on any lexing or parsing error.
+//
+// The returned DocumentNode preserves all whitespace, comments, and formatting
+// from the original source. Serializing it back with Bytes produces the exact
+// original bytes (round-trip fidelity).
+//
+// Returns a *ParseError on any lexing or parsing error, including duplicate
+// key detection and invalid TOML syntax.
 func Parse(src []byte) (*DocumentNode, error) {
 	tokens, err := lex(src)
 	if err != nil {

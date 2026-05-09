@@ -6,20 +6,20 @@ import "time"
 type StringStyle int
 
 const (
-	StringBasic StringStyle = iota
-	StringLiteral
-	StringMultiLineBasic
-	StringMultiLineLiteral
+	StringBasic            StringStyle = iota // StringBasic is a double-quoted string ("...").
+	StringLiteral                             // StringLiteral is a single-quoted string ('...').
+	StringMultiLineBasic                      // StringMultiLineBasic is a triple-double-quoted string ("""...""").
+	StringMultiLineLiteral                    // StringMultiLineLiteral is a triple-single-quoted string ('''...''').
 )
 
 // IntegerBase indicates the numeric base for an integer node.
 type IntegerBase int
 
 const (
-	IntegerDecimal IntegerBase = iota
-	IntegerHex
-	IntegerOctal
-	IntegerBinary
+	IntegerDecimal IntegerBase = iota // IntegerDecimal is base-10 (e.g. 42).
+	IntegerHex                        // IntegerHex is base-16 (e.g. 0xFF).
+	IntegerOctal                      // IntegerOctal is base-8 (e.g. 0o77).
+	IntegerBinary                     // IntegerBinary is base-2 (e.g. 0b1010).
 )
 
 // DocumentNode is the root node of a TOML document.

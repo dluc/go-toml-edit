@@ -10,9 +10,9 @@ import (
 type ChangeKind int
 
 const (
-	Added    ChangeKind = iota
-	Removed
-	Modified
+	Added    ChangeKind = iota // Added means the key exists in b but not in a.
+	Removed                    // Removed means the key exists in a but not in b.
+	Modified                   // Modified means the key exists in both but with different values.
 )
 
 var changeKindNames = [...]string{
@@ -30,6 +30,7 @@ func (k ChangeKind) String() string {
 }
 
 // Change represents a single difference between two documents.
+// OldValue is nil for Added changes; NewValue is nil for Removed changes.
 type Change struct {
 	Kind     ChangeKind
 	Path     string
@@ -38,8 +39,11 @@ type Change struct {
 }
 
 // Diff returns all differences between documents a and b.
-// Changes are sorted by path (alphabetical), then by kind
-// (Removed, Modified, Added).
+//
+// It walks both documents to collect all leaf (scalar) values, then compares
+// them. Container nodes (inline tables, arrays) are not compared directly;
+// instead their individual elements are compared. Changes are sorted by path
+// (alphabetical), then by kind (Removed, Modified, Added).
 func Diff(a, b *DocumentNode) []Change {
 	aLeaves := collectLeaves(a)
 	bLeaves := collectLeaves(b)

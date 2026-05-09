@@ -3,10 +3,11 @@ package tomledit
 import "fmt"
 
 // SetComment sets the inline comment on the node at the given path.
-// The comment string should NOT include the # prefix -- it will be added
+// The comment string should NOT include the "# " prefix -- it will be added
 // automatically. An empty string removes the comment.
-// For table paths, the comment is set on the table header.
-// Returns an error if the path doesn't exist.
+// For table paths, the comment is set on the table header line.
+// Returns an error if the path does not exist or targets a member of an
+// inline table (TOML forbids comments inside inline tables).
 func (d *DocumentNode) SetComment(path string, comment string) error {
 	node, err := d.resolveCommentTarget(path)
 	if err != nil {
@@ -22,9 +23,9 @@ func (d *DocumentNode) SetComment(path string, comment string) error {
 }
 
 // SetLeadingComments sets the leading comment lines on the node at the given
-// path. Each string should NOT include the # prefix -- it will be added
+// path. Each string should NOT include the "# " prefix -- it will be added
 // automatically. For table paths, the comments are set on the table header.
-// Returns an error if the path doesn't exist.
+// Returns an error if the path does not exist.
 func (d *DocumentNode) SetLeadingComments(path string, comments []string) error {
 	node, err := d.resolveCommentTarget(path)
 	if err != nil {

@@ -7,14 +7,20 @@ import (
 )
 
 // Set updates the value at the given path. If the final key does not exist in
-// an existing parent, it is created. Returns an error if intermediate path
-// segments do not exist.
+// an existing parent, it is created as a new key-value pair. Returns an error
+// if intermediate path segments do not exist.
+//
+// Supported value types: string, bool, int/int8-64, uint/uint8-64, float32/64,
+// time.Time, LocalDateTime, LocalDate, LocalTime, []any, map[string]any, and
+// any type implementing the Node interface. Use SetCreate to auto-create
+// intermediate tables.
 func (d *DocumentNode) Set(path string, value any) error {
 	return d.setInternal(path, value, false)
 }
 
-// SetCreate is like Set but auto-creates intermediate tables when they do not
-// exist (standard [table] headers appended to the document).
+// SetCreate is like Set but auto-creates intermediate [table] headers when they
+// do not exist. Missing tables are appended to the document. This is convenient
+// for inserting values into deeply nested paths that may not yet exist.
 func (d *DocumentNode) SetCreate(path string, value any) error {
 	return d.setInternal(path, value, true)
 }
@@ -258,8 +264,9 @@ func newKeyValueNode(key string, val Node) *KeyValueNode {
 	return kv
 }
 
-// Delete removes the node at the given path from the document.
-// Returns nil (no error) if the path does not exist.
+// Delete removes the node at the given path from the document. It handles
+// key-value pairs, tables, array-of-tables, and array elements. Returns nil
+// (no error) if the path does not exist, making it safe to call unconditionally.
 func (d *DocumentNode) Delete(path string) error {
 	segments, err := parsePath(path)
 	if err != nil {
@@ -408,9 +415,10 @@ func deleteIndexFromParent(parent Node, index int) error {
 	}
 }
 
-// Rename changes the key name of the node at the given path.
-// Returns an error if the path does not exist or if newKey conflicts with an
-// existing sibling key.
+// Rename changes the key name of the node at the given path to newKey.
+// Returns an error if the path does not exist, if newKey conflicts with an
+// existing sibling key, or if the last path segment is an array index (only
+// key segments can be renamed).
 func (d *DocumentNode) Rename(path string, newKey string) error {
 	segments, err := parsePath(path)
 	if err != nil {
@@ -479,7 +487,8 @@ func renameKeyInParent(parent Node, oldKey, newKey string) error {
 }
 
 // NewTable creates a new [table] header at the given path and appends it to
-// the document. Returns an error if a table with that path already exists.
+// the document. The path must consist of key segments only (no array indices).
+// Returns an error if a table with that exact path already exists.
 func (d *DocumentNode) NewTable(path string) error {
 	segments, err := parsePath(path)
 	if err != nil {
@@ -518,7 +527,9 @@ func (d *DocumentNode) NewTable(path string) error {
 }
 
 // NewArrayTable appends a new [[array-table]] entry at the given path.
-// Multiple entries with the same path are valid in TOML.
+// Multiple entries with the same path are valid in TOML and represent
+// successive elements of the array. The path must consist of key segments
+// only (no array indices).
 func (d *DocumentNode) NewArrayTable(path string) error {
 	segments, err := parsePath(path)
 	if err != nil {

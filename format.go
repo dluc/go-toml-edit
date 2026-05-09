@@ -6,6 +6,8 @@ import (
 )
 
 // FormatConfig controls how the formatter normalizes TOML output.
+// Use DefaultFormatConfig to get sensible defaults and WithIndentWidth,
+// WithLineWidth, or WithTableBlankLine to override specific settings.
 type FormatConfig struct {
 	IndentWidth    int  // spaces per indent level (default: 0, no indentation of values)
 	LineWidth      int  // max line width before arrays go multi-line (default: 80)
@@ -50,7 +52,9 @@ func WithTableBlankLine(b bool) FormatOption {
 
 // Format returns normalized TOML bytes. It does NOT mutate the document --
 // it produces a new byte slice by walking the AST and re-rendering every node
-// with consistent formatting, ignoring all raw bytes.
+// with consistent formatting, ignoring all raw bytes. This is useful for
+// enforcing a canonical style. Pass zero or more FormatOption values (e.g.
+// WithIndentWidth, WithLineWidth) to customize the output.
 func (d *DocumentNode) Format(opts ...FormatOption) []byte {
 	cfg := DefaultFormatConfig()
 	for _, opt := range opts {

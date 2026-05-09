@@ -6,8 +6,10 @@ import (
 )
 
 // Cursor provides a fluent, nil-safe API for navigating a TOML document's AST.
-// A Cursor is never nil. If navigation fails, the cursor captures the error
-// and all subsequent operations become no-ops.
+// A Cursor is never nil. If navigation fails at any point, the cursor captures
+// the error and all subsequent operations (Key, At, String, etc.) become no-ops
+// that propagate the original error. Check Err after a chain of calls to see
+// whether the traversal succeeded.
 type Cursor struct {
 	node Node
 	doc  *DocumentNode
@@ -16,7 +18,9 @@ type Cursor struct {
 	tablePath []string
 }
 
-// Key returns a new cursor navigated to the named child of the current node.
+// Key returns a Cursor navigated to the named child of the document root.
+// This is the entry point for the fluent cursor API. Chain additional Key or
+// At calls to traverse deeper, then extract the value with String, Int, etc.
 func (d *DocumentNode) Key(name string) *Cursor {
 	c := &Cursor{node: d, doc: d}
 	return c.Key(name)

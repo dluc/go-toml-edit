@@ -4,7 +4,10 @@ import "iter"
 
 // Items returns a range-over-func iterator over elements at the given path.
 // Works with ArrayNode elements (inline arrays) and array-of-tables entries.
-// Returns an empty iterator for invalid/missing paths or non-array nodes.
+// Returns an empty iterator if the path is invalid, not found, or points to a
+// non-array node. Use with a range loop:
+//
+//	for i, node := range doc.Items("servers") { ... }
 func (d *DocumentNode) Items(path string) iter.Seq2[int, Node] {
 	return func(yield func(int, Node) bool) {
 		segments, err := parsePath(path)
@@ -19,8 +22,8 @@ func (d *DocumentNode) Items(path string) iter.Seq2[int, Node] {
 	}
 }
 
-// Len returns the number of elements at the path. Returns -1 if the path
-// doesn't exist or isn't an array/array-of-tables.
+// Len returns the number of elements at the path. Returns -1 if the path is
+// invalid, does not exist, or does not point to an array or array-of-tables.
 func (d *DocumentNode) Len(path string) int {
 	segments, err := parsePath(path)
 	if err != nil {

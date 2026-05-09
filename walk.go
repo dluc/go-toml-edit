@@ -6,13 +6,20 @@ import (
 	"strings"
 )
 
-// SkipTable is returned from a Walk visitor to skip the current table's
-// children (or inline table's children).
+// SkipTable is a sentinel error returned from a Walk visitor function to skip
+// the current table's children (or inline table's children). Returning
+// SkipTable on a scalar node is a no-op.
 var SkipTable = errors.New("skip table")
 
-// Walk visits every key-value pair in the document in order, calling fn
-// with the dot-path and the value node. Tables are walked into, not yielded
-// as standalone entries.
+// Walk visits every key-value pair in the document in order, calling fn with
+// the dot-path and the value node. Tables and array-of-tables are walked into
+// (their children are visited), not yielded as standalone entries. Inline
+// tables and arrays are yielded first, then their children are recursed into.
+//
+// The path uses dot-separated keys with bracket indices for array-of-tables
+// entries (e.g. "servers[0].host"). Return SkipTable from fn to skip the
+// children of the current inline table or array. Return any other non-nil
+// error to stop the walk immediately.
 func (d *DocumentNode) Walk(fn func(path string, node Node) error) error {
 	// Phase 1: root-level KVs (before any table header)
 	for _, child := range d.Children {

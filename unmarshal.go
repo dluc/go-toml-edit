@@ -8,13 +8,19 @@ import (
 	"time"
 )
 
-// Unmarshaler is implemented by types that can unmarshal themselves from a TOML Node.
+// Unmarshaler is implemented by types that can unmarshal themselves from a TOML
+// Node. The node passed to UnmarshalTOML is the raw AST node (e.g. a StringNode,
+// IntegerNode, or TableNode), allowing custom decoding logic.
 type Unmarshaler interface {
 	UnmarshalTOML(node Node) error
 }
 
 // Unmarshal parses TOML data and decodes it into v.
-// v must be a non-nil pointer to a struct or map.
+//
+// v must be a non-nil pointer to a struct or map[string]any. Struct fields are
+// matched by their "toml" tag, then by exact field name, then by case-insensitive
+// name. Unknown TOML keys are silently ignored. Types implementing Unmarshaler
+// or encoding.TextUnmarshaler are handled automatically.
 func Unmarshal(data []byte, v any) error {
 	doc, err := Parse(data)
 	if err != nil {
@@ -24,7 +30,9 @@ func Unmarshal(data []byte, v any) error {
 }
 
 // Decode decodes the document's content into v.
-// v must be a non-nil pointer to a struct or map.
+// v must be a non-nil pointer to a struct or map[string]any. Unlike Unmarshal,
+// Decode operates on an already-parsed DocumentNode, which is useful when you
+// need both the AST (for editing) and the decoded values.
 func (d *DocumentNode) Decode(v any) error {
 	rv := reflect.ValueOf(v)
 	if rv.Kind() != reflect.Pointer || rv.IsNil() {
