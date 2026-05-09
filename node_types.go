@@ -1,0 +1,174 @@
+package tomledit
+
+import "time"
+
+// StringStyle indicates the quoting style for a string node.
+type StringStyle int
+
+const (
+	StringBasic StringStyle = iota
+	StringLiteral
+	StringMultiLineBasic
+	StringMultiLineLiteral
+)
+
+// IntegerBase indicates the numeric base for an integer node.
+type IntegerBase int
+
+const (
+	IntegerDecimal IntegerBase = iota
+	IntegerHex
+	IntegerOctal
+	IntegerBinary
+)
+
+// DocumentNode is the root node of a TOML document.
+type DocumentNode struct {
+	nodeBase
+	Children []Node
+}
+
+func (n *DocumentNode) Type() NodeType { return NodeDocument }
+func (n *DocumentNode) Value() any     { return n.Children }
+
+// TableNode represents a [table] header and its children.
+type TableNode struct {
+	nodeBase
+	KeyPath  []string
+	Children []Node
+}
+
+func (n *TableNode) Type() NodeType { return NodeTable }
+func (n *TableNode) Value() any     { return n.Children }
+
+// ArrayTableNode represents an [[array-table]] header and its children.
+type ArrayTableNode struct {
+	nodeBase
+	KeyPath  []string
+	Children []Node
+}
+
+func (n *ArrayTableNode) Type() NodeType { return NodeArrayTable }
+func (n *ArrayTableNode) Value() any     { return n.Children }
+
+// KeyValueNode represents a key = value pair.
+type KeyValueNode struct {
+	nodeBase
+	Key   *KeyNode
+	Val   Node
+}
+
+func (n *KeyValueNode) Type() NodeType { return NodeKeyValue }
+func (n *KeyValueNode) Value() any     { return n.Val }
+
+// KeyNode represents a (possibly dotted) key.
+type KeyNode struct {
+	nodeBase
+	Parts    []string   // semantic parts (e.g. ["server", "host"])
+	RawParts [][]byte   // original bytes for each part
+	Styles   []StringStyle // quoting style per part
+}
+
+func (n *KeyNode) Type() NodeType { return NodeKey }
+func (n *KeyNode) Value() any     { return n.Parts }
+
+// StringNode represents a string value.
+type StringNode struct {
+	nodeBase
+	Val   string
+	Style StringStyle
+}
+
+func (n *StringNode) Type() NodeType { return NodeString }
+func (n *StringNode) Value() any     { return n.Val }
+
+// IntegerNode represents an integer value.
+type IntegerNode struct {
+	nodeBase
+	Val  int64
+	Base IntegerBase
+}
+
+func (n *IntegerNode) Type() NodeType { return NodeInteger }
+func (n *IntegerNode) Value() any     { return n.Val }
+
+// FloatNode represents a float value.
+type FloatNode struct {
+	nodeBase
+	Val float64
+}
+
+func (n *FloatNode) Type() NodeType { return NodeFloat }
+func (n *FloatNode) Value() any     { return n.Val }
+
+// BooleanNode represents a boolean value.
+type BooleanNode struct {
+	nodeBase
+	Val bool
+}
+
+func (n *BooleanNode) Type() NodeType { return NodeBoolean }
+func (n *BooleanNode) Value() any     { return n.Val }
+
+// DateTimeNode represents an offset date-time value.
+type DateTimeNode struct {
+	nodeBase
+	Val time.Time
+}
+
+func (n *DateTimeNode) Type() NodeType { return NodeDateTime }
+func (n *DateTimeNode) Value() any     { return n.Val }
+
+// LocalDateTimeNode represents a local date-time value (no timezone).
+type LocalDateTimeNode struct {
+	nodeBase
+	Val LocalDateTime
+}
+
+func (n *LocalDateTimeNode) Type() NodeType { return NodeLocalDateTime }
+func (n *LocalDateTimeNode) Value() any     { return n.Val }
+
+// LocalDateNode represents a local date value.
+type LocalDateNode struct {
+	nodeBase
+	Val LocalDate
+}
+
+func (n *LocalDateNode) Type() NodeType { return NodeLocalDate }
+func (n *LocalDateNode) Value() any     { return n.Val }
+
+// LocalTimeNode represents a local time value.
+type LocalTimeNode struct {
+	nodeBase
+	Val LocalTime
+}
+
+func (n *LocalTimeNode) Type() NodeType { return NodeLocalTime }
+func (n *LocalTimeNode) Value() any     { return n.Val }
+
+// ArrayNode represents an array value.
+type ArrayNode struct {
+	nodeBase
+	Elements []Node
+}
+
+func (n *ArrayNode) Type() NodeType { return NodeArray }
+func (n *ArrayNode) Value() any     { return n.Elements }
+
+// InlineTableNode represents an inline table value.
+type InlineTableNode struct {
+	nodeBase
+	Children []Node // KeyValueNode entries
+}
+
+func (n *InlineTableNode) Type() NodeType { return NodeInlineTable }
+func (n *InlineTableNode) Value() any     { return n.Children }
+
+// CommentNode represents a standalone comment line.
+type CommentNode struct {
+	nodeBase
+	Text string
+}
+
+func (n *CommentNode) Type() NodeType { return NodeComment }
+func (n *CommentNode) Value() any     { return n.Text }
