@@ -131,6 +131,16 @@ func mergeChildren(target *DocumentNode, source *DocumentNode, scope Node, prefi
 	// Process sub-tables and array-tables from the source document that
 	// belong to the current scope.
 	scopePath := scopeKeyPath(scope)
+
+	// Collect array-table entries grouped by path so we can handle them
+	// atomically (all-or-nothing per path).
+	type arrayTableGroup struct {
+		subPrefix string
+		entries   []*ArrayTableNode
+	}
+	var arrayTableGroups []arrayTableGroup
+	seenArrayPaths := map[string]int{} // subPrefix -> index into arrayTableGroups
+
 	for _, child := range source.Children {
 		switch n := child.(type) {
 		case *TableNode:
@@ -156,23 +166,37 @@ func mergeChildren(target *DocumentNode, source *DocumentNode, scope Node, prefi
 			}
 
 		case *ArrayTableNode:
-			// Array-of-tables: for merge semantics, we don't merge individual
-			// entries. If the target already has the path as an array-of-tables,
-			// we skip. If it doesn't exist, we create entries.
 			if !isDirectChild(n.KeyPath, scopePath) {
 				continue
 			}
 			suffix := n.KeyPath[len(scopePath):]
 			subPrefix := buildPathFromParts(prefix, suffix)
 
-			existing := target.Get(subPrefix)
-			if existing == nil {
-				// Copy the array-table entry.
-				if err := mergeArrayTableEntry(target, source, n, subPrefix); err != nil {
-					return err
-				}
+			if idx, ok := seenArrayPaths[subPrefix]; ok {
+				arrayTableGroups[idx].entries = append(arrayTableGroups[idx].entries, n)
+			} else {
+				seenArrayPaths[subPrefix] = len(arrayTableGroups)
+				arrayTableGroups = append(arrayTableGroups, arrayTableGroup{
+					subPrefix: subPrefix,
+					entries:   []*ArrayTableNode{n},
+				})
 			}
-			// If it exists, keep target's version (atomic for array-of-tables).
+		}
+	}
+
+	// Process array-table groups: if target has zero entries, copy all;
+	// if target already has entries, skip (atomic).
+	for _, group := range arrayTableGroups {
+		existing := target.Get(group.subPrefix)
+		if existing != nil {
+			// Target already has this array-of-tables: keep it (atomic).
+			continue
+		}
+		// Target has no entries: copy all source entries.
+		for _, entry := range group.entries {
+			if err := mergeArrayTableEntry(target, source, entry, group.subPrefix); err != nil {
+				return err
+			}
 		}
 	}
 
