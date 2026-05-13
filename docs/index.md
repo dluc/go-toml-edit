@@ -4,5 +4,4 @@ Comment-preserving TOML editing library for Go.
 
 ## API Reference
 
-:::module .
-:::
+:-: ref path="."
