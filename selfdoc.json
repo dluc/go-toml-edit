@@ -1,4 +1,5 @@
 {
+  "base_url": "https://go-toml-edit.smmh.dev",
   "language": "go",
   "source": ["."],
   "docs": "docs/",
