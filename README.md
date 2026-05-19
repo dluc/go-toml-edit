@@ -85,6 +85,16 @@ doc.Delete("server.debug")                 // remove a key
 doc.Rename("server.host", "address")       // rename a key
 ```
 
+### Comment Management
+
+```go
+doc.SetComment("server.port", "default: 8080")
+doc.SetLeadingComments("server", []string{
+	"Server configuration",
+	"See docs for all options",
+})
+```
+
 ### Fluent Cursor
 
 ```go
@@ -119,6 +129,15 @@ doc.Walk(func(path string, node tomledit.Node) error {
 	fmt.Printf("%s = %v\n", path, node.Value())
 	return nil
 }, tomledit.WalkLeaves)
+```
+
+### Array Iteration
+
+```go
+for i, item := range doc.Items("servers") {
+	fmt.Printf("[%d] %v\n", i, item.Value())
+}
+fmt.Println(doc.Len("servers"))
 ```
 
 ### Diff
