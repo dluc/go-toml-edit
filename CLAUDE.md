@@ -1,0 +1,80 @@
+# go-toml-edit
+
+Comment-preserving TOML parser and editor library for Go. Single `tomledit` package, no CLI.
+
+## Architecture
+
+Hybrid AST with byte ranges. Every node records its span in the original source. Trivia (comments, whitespace, blank lines) is attached to nodes rather than discarded. On serialization, clean (unmodified) nodes splice original bytes directly; dirty (edited) nodes re-render from semantic values. This gives zero-diff round-trips for untouched regions.
+
+### Parse-edit-render pipeline
+
+1. Lexer tokenizes source, producing tokens with byte offsets
+2. Parser builds AST from tokens, attaching trivia (comments, whitespace) to the nearest node
+3. Each node stores its byte range `[start, end)` in the original source
+4. Edit operations (Set, Delete, Rename) mark affected nodes as dirty
+5. Render: clean nodes copy `src[start:end]`; dirty nodes serialize from their semantic value
+
+### Source files
+
+| File | Lines | Purpose |
+|------|-------|---------|
+| `parser.go` | 1614 | Recursive descent parser, AST construction with trivia attachment |
+| `lexer.go` | 1166 | Context-sensitive tokenizer for TOML 1.0 |
+| `unmarshal.go` | 1173 | Decode AST into Go structs/maps via reflection |
+| `edit.go` | 710 | Mutation: Set, SetCreate, Delete, Rename, NewTable, NewArrayTable |
+| `document.go` | 659 | Path resolution, table/key lookup, typed getters |
+| `render.go` | 614 | Serialization: clean nodes splice bytes, dirty nodes re-render |
+| `merge.go` | 480 | Deep merge with comment preservation |
+| `format.go` | 418 | Opinionated formatter with configurable style |
+| `walk.go` | 367 | Depth-first traversal with WalkLeaves/WalkAll modes |
+| `node.go` | 176 | Node interface, Trivia struct, temporal types (LocalDateTime, LocalDate, LocalTime) |
+| `node_types.go` | 175 | Concrete node structs for all TOML value types |
+| `path.go` | 145 | Path parser: dot-separated keys, bracket indices, quoting |
+| `cursor.go` | 132 | Fluent navigation API with accumulating errors |
+| `comments.go` | 129 | SetComment, SetLeadingComments helpers |
+| `diff.go` | 117 | Document comparison returning Added/Removed/Modified changes |
+| `iterate.go` | 88 | Items (range-over-func) and Len for arrays/array-tables |
+| `token.go` | 76 | Token types and Token struct |
+| `errors.go` | 18 | ParseError with line/column/offset |
+| `tomledit.go` | 15 | Package doc comment |
+
+### Key design decisions
+
+- Single package: everything is in `tomledit`, no internal/ subpackages
+- Virtual node types (dottedKeyView, compoundTableView, arrayTableCollection) handle TOML's complex table semantics without exposing them in the public API
+- Path syntax supports: `server.host`, `array[0]`, `array[-1]`, `"key.with.dots"`
+- Node interface unifies all AST types: Type(), Value(), Comment(), LeadingComments(), Raw()
+- Dirty tracking is per-node, not per-document, so only edited subtrees re-render
+
+## Build and test
+
+```sh
+go test ./...           # all tests including toml-test compliance
+go test -bench .        # benchmarks against BurntSushi/toml
+go test -fuzz FuzzParse # fuzz the parser
+```
+
+## Testing strategy
+
+- 13 audit test files (`*_audit_test.go`) cover parser, serializer, comments, edits, diff, merge, unmarshal, walk, format, cursor
+- TOML 1.0 compliance: 205 valid + 474 invalid cases from the official toml-test suite
+- Round-trip fidelity: `Parse(x).Bytes()` must equal `x` for any valid TOML
+- Fuzz testing for parser robustness
+
+## Release workflow
+
+This project uses [rlsbl](https://github.com/smm-h/rlsbl) for release orchestration.
+
+- Run `rlsbl release [patch|minor|major]` to bump version and create a GitHub Release
+- Go library -- no publish step. Tagged releases are available via `go get`.
+- Use `rlsbl release --dry-run` to preview without making changes
+- Never publish manually -- always use `rlsbl release`
+
+## Conventions
+
+- Go library only -- no CLI, no binary
+- Full TOML 1.0 compliance is non-negotiable: the toml-test suite must pass
+- Comments are first-class: any operation that silently loses comments is a bug
+- Round-trip fidelity: `Parse(x).Bytes()` must equal `x` for any valid TOML input
+- BurntSushi/toml is a dev dependency for benchmarks only, not a runtime dependency
+- toml-test/v2 is a test dependency for compliance verification only
