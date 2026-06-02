@@ -1,8 +1,7 @@
 {
   "version": "0.1.2",
   "base_url": "https://go-toml-edit.smmh.dev",
-  "language": "go",
-  "source": ["."],
+  "source": [{"path": ".", "language": "go"}],
   "docs": "docs/",
   "output": "docs/_build/",
   "versions": [{"version": "0.1.2", "indexed": true}],
