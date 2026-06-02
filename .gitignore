@@ -16,3 +16,5 @@ dist/
 # Selfdoc / Cloudflare
 docs/_build/
 .wrangler/
+
+.rlsbl/lock
