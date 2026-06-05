@@ -3,5 +3,6 @@
     "go",
     "docs"
   ],
-  "private": false
+  "private": false,
+  "push_timeout": 120
 }
