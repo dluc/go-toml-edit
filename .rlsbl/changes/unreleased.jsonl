@@ -14,3 +14,4 @@
 {"commits":["6aacc9105befd2c0d6ee1c887a22a4582f87e84f"],"user_facing":true,"description":"**New feature.** `Marshal(v any) ([]byte, error)` serializes Go maps to TOML bytes. Supports flat and nested `map[string]any` with all primitive types. Nested maps become `[section]` headers; keys are sorted for deterministic output.","type":"feature"}
 {"commits":["52349ef8ca7762749fcf2ad1ca481eb4b2126040","9e58ee7d5ce732ff463d8a917efeb67d1e935991"],"user_facing":false}
 {"commits":["21d3691a231c00a4d45ec66ab32f7fbbdef007d8"],"user_facing":false}
+{"commits":["00c5d139a3f3f2bae86fde6fb402f1000983dbd8"],"user_facing":false}
