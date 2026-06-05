@@ -291,3 +291,51 @@ func TestMarshalDeeplyNestedMap(t *testing.T) {
 		t.Errorf("outer.inner.deep: got %v, want %q", inner["deep"], "value")
 	}
 }
+
+func TestMarshalInlineTableDeterministicKeyOrder(t *testing.T) {
+	// Maps at depth > 2 become inline tables via mapToInlineTableNode.
+	// Keys must be sorted for deterministic output.
+	input := map[string]any{
+		"section": map[string]any{
+			"nested": map[string]any{
+				"zebra":   1,
+				"alpha":   2,
+				"mango":   3,
+				"banana":  4,
+				"cherry":  5,
+			},
+		},
+	}
+
+	// Marshal once to get the reference output.
+	ref, err := Marshal(input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Marshal many times and verify identical output each time.
+	for i := 0; i < 100; i++ {
+		b, err := Marshal(input)
+		if err != nil {
+			t.Fatalf("iteration %d: unexpected error: %v", i, err)
+		}
+		if string(b) != string(ref) {
+			t.Fatalf("non-deterministic output on iteration %d:\nreference:\n%s\ngot:\n%s", i, string(ref), string(b))
+		}
+	}
+
+	// Verify the inline table keys appear in sorted order.
+	out := string(ref)
+	alphaIdx := strings.Index(out, "alpha")
+	bananaIdx := strings.Index(out, "banana")
+	cherryIdx := strings.Index(out, "cherry")
+	mangoIdx := strings.Index(out, "mango")
+	zebraIdx := strings.Index(out, "zebra")
+
+	if alphaIdx < 0 || bananaIdx < 0 || cherryIdx < 0 || mangoIdx < 0 || zebraIdx < 0 {
+		t.Fatalf("missing keys in output:\n%s", out)
+	}
+	if !(alphaIdx < bananaIdx && bananaIdx < cherryIdx && cherryIdx < mangoIdx && mangoIdx < zebraIdx) {
+		t.Errorf("inline table keys are not in sorted order:\n%s", out)
+	}
+}

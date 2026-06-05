@@ -3,6 +3,7 @@ package tomledit
 import (
 	"fmt"
 	"reflect"
+	"sort"
 	"time"
 )
 
@@ -695,11 +696,17 @@ func sliceToArrayNode(items []any) (Node, error) {
 }
 
 // mapToInlineTableNode converts a map[string]any to an InlineTableNode.
+// Keys are sorted alphabetically for deterministic output.
 func mapToInlineTableNode(m map[string]any) (Node, error) {
 	tbl := &InlineTableNode{}
 	tbl.markDirty()
-	for k, v := range m {
-		valNode, err := valueToNode(v)
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		valNode, err := valueToNode(m[k])
 		if err != nil {
 			return nil, fmt.Errorf("inline table key %q: %w", k, err)
 		}
