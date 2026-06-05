@@ -2,16 +2,22 @@
 
 # Changelog
 
-## 0.2.0
+## 0.2.1
 
-Add Marshal for map-to-TOML serialization
+Deterministic inline table key ordering
 
 <details>
 <summary>Context</summary>
 
-strictcli needs Marshal to write TOML config files. This adds the inverse of Unmarshal for map types (struct support deferred to v2).
+mapToInlineTableNode now sorts keys alphabetically, fixing non-deterministic output for deeply nested maps in Marshal.
 
 </details>
+
+### Fixes
+
+- **Bug fix.** Inline tables in `Marshal` output now have deterministic key ordering.
+
+## 0.2.0
 
 ### Features
 
