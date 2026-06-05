@@ -1,8 +1,13 @@
 {
   "targets": [
-    "go",
-    "docs"
+    "go"
   ],
   "private": false,
-  "push_timeout": 120
+  "push_timeout": 120,
+  "pipelines": {
+    "docs-deploy": {
+      "type": "cloudflare-pages",
+      "local": true
+    }
+  }
 }
