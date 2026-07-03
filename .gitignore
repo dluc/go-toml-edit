@@ -18,3 +18,5 @@ docs/_build/
 .wrangler/
 
 .rlsbl/lock
+
+.rlsbl-monorepo/lock

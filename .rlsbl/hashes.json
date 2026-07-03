@@ -1,8 +1,8 @@
 {
-  "VERSION": "f7af902eefb89f3a2216d798078294bb927e71c64bad70551f80effabd375875",
-  ".github/workflows/ci.yml": "afdab1eb0c82538e6f96dd4a3c76098e27c0dc8eb89a5495bcf7b6a32d03e71d",
-  "CHANGELOG.md": "fca781960bc4a70fce00e622926810542c6c62b34357a1228fa2e8432108c013",
-  ".gitignore": "f0c886d6ec9f2a300a54a95ea34e809b8416b9d9f3387e782ac9376c5d1bb7a1",
+  "VERSION": "71015c979ccb0fc8a0be7ca0ae83046ab045cdc2c8faa09fb2f0f7e440f9b4a6",
+  ".github/workflows/ci.yml": "a4eb37a8927ffda2aa646e45ac6f849648a53ea7fb4efe0df4fda3c9946c28f9",
+  "CHANGELOG.md": "3202114356eaee8378ef3fbdf82163dfb5425f9a481245caedb78f263c0557de",
+  ".gitignore": "9416f6512d8663384906f7593cd1a38572318fab5914613b0ebf75b6187645c5",
   "LICENSE": "e958892abc1dd5d991fca6d528e695d335f25773d373d2e0be5f4a9507d8f8d5",
   "CLAUDE.md": "c540f0a00a824a1b45be3e95aaed8128dfa651029b96856abe697ab73423ba53",
   ".rlsbl/hooks/pre-release.sh": "799fe9a8ed742f5b4f7bc32856df8487b05ab28a37aaa0e9ecf854ea289c5305",

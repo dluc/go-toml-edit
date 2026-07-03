@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "files": {
+    "VERSION": "71015c979ccb0fc8a0be7ca0ae83046ab045cdc2c8faa09fb2f0f7e440f9b4a6",
+    ".github/workflows/ci.yml": "a4eb37a8927ffda2aa646e45ac6f849648a53ea7fb4efe0df4fda3c9946c28f9",
+    "CHANGELOG.md": "3202114356eaee8378ef3fbdf82163dfb5425f9a481245caedb78f263c0557de",
+    ".gitignore": "9416f6512d8663384906f7593cd1a38572318fab5914613b0ebf75b6187645c5",
+    ".rlsbl/changes/unreleased.jsonl": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    ".rlsbl/lint/go.toml": "807d5cf760baad6d571a5bfd43cb163efe356f7462ba9f1918d72de45f62339f"
+  }
+}
