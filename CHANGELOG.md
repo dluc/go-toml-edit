@@ -2,6 +2,14 @@
 
 # Changelog
 
+## 0.2.2
+
+Bug fix: ParseError positions for EOF and duplicate-key errors.
+
+### Fixes
+
+- **Bug fix.** ParseError now reports correct line/column positions for EOF errors and duplicate-key/table errors (previously reported line 0, column 0).
+
 ## 0.2.1
 
 Deterministic inline table key ordering
@@ -18,6 +26,15 @@ mapToInlineTableNode now sorts keys alphabetically, fixing non-deterministic out
 - **Bug fix.** Inline tables in `Marshal` output now have deterministic key ordering.
 
 ## 0.2.0
+
+Add Marshal for map-to-TOML serialization
+
+<details>
+<summary>Context</summary>
+
+strictcli needs Marshal to write TOML config files. This adds the inverse of Unmarshal for map types (struct support deferred to v2).
+
+</details>
 
 ### Features
 
