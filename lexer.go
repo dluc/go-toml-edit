@@ -62,7 +62,7 @@ func (l *lexer) run() error {
 			return err
 		}
 	}
-	l.emit(TokenEOF, l.pos, l.pos)
+	l.emitAt(TokenEOF, l.pos, l.pos, l.line, l.col)
 	return nil
 }
 
@@ -79,16 +79,6 @@ func (l *lexer) peekAt(offset int) byte {
 		return l.src[p]
 	}
 	return 0
-}
-
-func (l *lexer) emit(typ TokenType, start, end int) {
-	l.tokens = append(l.tokens, Token{
-		Type:   typ,
-		Raw:    l.src[start:end],
-		Line:   0, // set below
-		Column: 0, // set below
-	})
-	// line/col are set before calling emit via the saved values
 }
 
 func (l *lexer) emitAt(typ TokenType, start, end, line, col int) {
