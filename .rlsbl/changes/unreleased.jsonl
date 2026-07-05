@@ -2,3 +2,4 @@
 {"commits":["9ee012933cac436e7abc310d22f68fa00caa132d","36acf8d1cae37e9a17877bca97021307594dc1f4"],"user_facing":true,"description":"**Bug fix.** ParseError now reports correct line/column positions for EOF errors and duplicate-key/table errors (previously reported line 0, column 0).","type":"fix"}
 {"commits":["f233bacdf841392226e5079ff25882011b3485e4","25a971b50f265786da0378d76dfd1349b1ad8424"],"user_facing":false}
 {"commits":["e02d25f44e36bbfdca2fd5ae1b6940be50c76256"],"user_facing":false}
+{"commits":["7365231fbac4705391283bd4f7b67ba96dd214b0","c6f71d07d64612886c84a598cd9bf3e6b9e94c77"],"user_facing":false}
