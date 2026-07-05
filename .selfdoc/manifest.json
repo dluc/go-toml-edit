@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "name": "go-toml-edit",
+  "slug": "go-toml-edit",
+  "version": "0.2.1",
+  "description": "",
+  "language": "go",
+  "base_url": "https://go-toml-edit.smmh.dev",
+  "pages": [
+    {
+      "path": "gen-index.md",
+      "title": "API Reference",
+      "type": "doc"
+    },
+    {
+      "path": "go-toml-edit.md",
+      "title": "go-toml-edit",
+      "type": "doc"
+    },
+    {
+      "path": "index.md",
+      "title": "go-toml-edit",
+      "type": "doc"
+    }
+  ],
+  "posts": [],
+  "last_gen": "2026-07-05T18:36:18.069210+00:00"
+}

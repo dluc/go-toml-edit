@@ -5,10 +5,12 @@
   },
   "en/go-toml-edit.md": {
     "content": "64285abaf990bb34d1ec6febe4e89768a27125251ce3361fe58e026fdb256b0d",
-    "description": "cf9395bb046f8e182d82f646b67ab3f7f5919ad5187ac4e646cb479dfda63632"
+    "description": "cf9395bb046f8e182d82f646b67ab3f7f5919ad5187ac4e646cb479dfda63632",
+    "source_docstring": "70cfcbf93fbaa8eec3a1cd9c08c7d8cd59bb791625a166a30307d045142918f3"
   },
   "en/index.md": {
     "content": "2ab69315a34995fe0a9e104e0ae0989026a41a3224510fc3ab64c492eec12516",
-    "description": "9b2cfc8fb2cdef184ce3cc02a8463aa859e1c4063a5182a7d9686a0be4a09ef8"
+    "description": "9b2cfc8fb2cdef184ce3cc02a8463aa859e1c4063a5182a7d9686a0be4a09ef8",
+    "source_docstring": "70cfcbf93fbaa8eec3a1cd9c08c7d8cd59bb791625a166a30307d045142918f3"
   }
 }
