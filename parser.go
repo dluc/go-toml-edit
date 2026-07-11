@@ -86,7 +86,7 @@ func (p *parser) errorf(format string, args ...any) error {
 //   - leadingWS: whitespace on the same line as the coming content
 //   - leadingComments: full comment lines (comment + newline)
 //   - raw: all consumed bytes concatenated
-func (p *parser) collectLeadingTrivia() (leadingWS []byte, leadingComments [][]byte, raw []byte) {
+func (p *parser) collectLeadingTrivia() (leadingWS []byte, leadingComments [][]byte, raw []byte, orphan orphanTrivia) {
 	// Accumulate lines. A "line" may be: whitespace, comment+newline, blank newline.
 	// The last whitespace run (if not followed by newline or comment) is the
 	// inline leading whitespace for the coming node.
@@ -94,16 +94,28 @@ func (p *parser) collectLeadingTrivia() (leadingWS []byte, leadingComments [][]b
 	var accumulated []byte // all bytes consumed
 	var pendingWS []byte   // whitespace not yet assigned
 
+	// track records the span of every consumed trivia token so orphan
+	// CommentNodes (emitted at end of input) can carry positions.
+	track := func(tok Token) {
+		sp := spanFromToken(tok)
+		if !orphan.span.IsValid() {
+			orphan.span.Start = sp.Start
+		}
+		orphan.span.End = sp.End
+	}
+
 	for {
 		tt := p.peekType()
 		switch tt {
 		case TokenWhitespace:
 			tok := p.advance()
+			track(tok)
 			pendingWS = append(pendingWS, tok.Raw...)
 			continue
 
 		case TokenNewline:
 			tok := p.advance()
+			track(tok)
 			// The pending whitespace + this newline is a blank line
 			accumulated = append(accumulated, pendingWS...)
 			accumulated = append(accumulated, tok.Raw...)
@@ -112,15 +124,18 @@ func (p *parser) collectLeadingTrivia() (leadingWS []byte, leadingComments [][]b
 
 		case TokenComment:
 			tok := p.advance()
+			track(tok)
 			// A comment line: pendingWS is its leading whitespace
 			commentLine := make([]byte, 0, len(pendingWS)+len(tok.Raw))
 			commentLine = append(commentLine, pendingWS...)
 			commentLine = append(commentLine, tok.Raw...)
 			pendingWS = nil
+			orphan.commentSpans = append(orphan.commentSpans, spanFromToken(tok))
 
 			// Consume the newline after the comment if present
 			if p.peekType() == TokenNewline {
 				nl := p.advance()
+				track(nl)
 				commentLine = append(commentLine, nl.Raw...)
 			}
 			accumulated = append(accumulated, commentLine...)
@@ -134,6 +149,14 @@ func (p *parser) collectLeadingTrivia() (leadingWS []byte, leadingComments [][]b
 			return
 		}
 	}
+}
+
+// orphanTrivia carries position data for trivia consumed by
+// collectLeadingTrivia, used when the trivia becomes orphan CommentNodes at
+// end of input.
+type orphanTrivia struct {
+	commentSpans []Span // parallel to leadingComments; each covers only the '#...' token
+	span         Span   // the entire consumed trivia region; zero if nothing was consumed
 }
 
 // consumeInlineTrivia consumes optional whitespace + comment on the same line
@@ -166,13 +189,13 @@ func (p *parser) parseDocument() (*DocumentNode, error) {
 	tracker := newDefinitionTracker()
 
 	for p.peekType() != TokenEOF {
-		leadingWS, leadingComments, triviaRaw := p.collectLeadingTrivia()
+		leadingWS, leadingComments, triviaRaw, orphan := p.collectLeadingTrivia()
 
 		tt := p.peekType()
 		switch {
 		case tt == TokenEOF:
 			// Any remaining trivia becomes orphan comment nodes
-			p.emitOrphanTrivia(doc, leadingComments, triviaRaw)
+			p.emitOrphanTrivia(doc, leadingComments, triviaRaw, orphan)
 
 		case tt == TokenLeftBracket:
 			tbl, err := p.parseTable(leadingWS, leadingComments, triviaRaw, tracker)
@@ -200,18 +223,28 @@ func (p *parser) parseDocument() (*DocumentNode, error) {
 		}
 	}
 
+	// The document spans from the first byte to the EOF position.
+	eof := p.peek()
+	doc.setSpan(Span{
+		Start: Position{Line: 1, Column: 1},
+		End:   Position{Line: eof.Line, Column: eof.Column},
+	})
+
 	return doc, nil
 }
 
-func (p *parser) emitOrphanTrivia(parent interface{ addChild(Node) }, comments [][]byte, raw []byte) {
+func (p *parser) emitOrphanTrivia(parent interface{ addChild(Node) }, comments [][]byte, raw []byte, orphan orphanTrivia) {
 	if len(comments) == 0 && len(raw) == 0 {
 		return
 	}
 	// If we have comment lines, emit them as CommentNodes
 	if len(comments) > 0 {
-		for _, c := range comments {
+		for i, c := range comments {
 			cn := &CommentNode{Text: string(c)}
 			cn.setRaw(c)
+			if i < len(orphan.commentSpans) {
+				cn.setSpan(orphan.commentSpans[i])
+			}
 			parent.addChild(cn)
 		}
 		return
@@ -220,6 +253,7 @@ func (p *parser) emitOrphanTrivia(parent interface{ addChild(Node) }, comments [
 	if len(raw) > 0 {
 		cn := &CommentNode{Text: ""}
 		cn.setRaw(raw)
+		cn.setSpan(orphan.span)
 		parent.addChild(cn)
 	}
 }
@@ -243,7 +277,7 @@ func (p *parser) parseTable(leadingWS []byte, leadingComments [][]byte, triviaRa
 	startPos := p.pos
 
 	// consume [
-	_, err := p.expect(TokenLeftBracket)
+	openTok, err := p.expect(TokenLeftBracket)
 	if err != nil {
 		return nil, err
 	}
@@ -260,7 +294,7 @@ func (p *parser) parseTable(leadingWS []byte, leadingComments [][]byte, triviaRa
 	p.skipWhitespace()
 
 	// consume ]
-	_, err = p.expect(TokenRightBracket)
+	closeTok, err := p.expect(TokenRightBracket)
 	if err != nil {
 		return nil, err
 	}
@@ -284,6 +318,8 @@ func (p *parser) parseTable(leadingWS []byte, leadingComments [][]byte, triviaRa
 		KeyPath: keyPath,
 	}
 	tbl.setRaw(headerRaw)
+	// The table span covers only the [header], not the children.
+	tbl.setSpan(Span{Start: tokenStart(openTok), End: spanFromToken(closeTok).End})
 	tbl.nodeTrivia.LeadingWhitespace = leadingWS
 	tbl.nodeTrivia.LeadingComments = leadingComments
 	tbl.nodeTrivia.InlineComment = inlineComment
@@ -307,7 +343,7 @@ func (p *parser) parseArrayTable(leadingWS []byte, leadingComments [][]byte, tri
 	startPos := p.pos
 
 	// consume [[
-	_, err := p.expect(TokenDoubleLeftBracket)
+	openTok, err := p.expect(TokenDoubleLeftBracket)
 	if err != nil {
 		return nil, err
 	}
@@ -323,7 +359,7 @@ func (p *parser) parseArrayTable(leadingWS []byte, leadingComments [][]byte, tri
 	p.skipWhitespace()
 
 	// consume ]]
-	_, err = p.expect(TokenDoubleRightBracket)
+	closeTok, err := p.expect(TokenDoubleRightBracket)
 	if err != nil {
 		return nil, err
 	}
@@ -347,6 +383,8 @@ func (p *parser) parseArrayTable(leadingWS []byte, leadingComments [][]byte, tri
 		KeyPath: keyPath,
 	}
 	atbl.setRaw(headerRaw)
+	// The array-table span covers only the [[header]], not the children.
+	atbl.setSpan(Span{Start: tokenStart(openTok), End: spanFromToken(closeTok).End})
 	atbl.nodeTrivia.LeadingWhitespace = leadingWS
 	atbl.nodeTrivia.LeadingComments = leadingComments
 	atbl.nodeTrivia.InlineComment = inlineComment
@@ -370,12 +408,12 @@ func (p *parser) parseTableChildren(parent childAdder, childTracker *definitionT
 	for {
 		// Peek ahead past trivia to see what's next
 		savedPos := p.pos
-		leadingWS, leadingComments, triviaRaw := p.collectLeadingTrivia()
+		leadingWS, leadingComments, triviaRaw, orphan := p.collectLeadingTrivia()
 
 		tt := p.peekType()
 		switch {
 		case tt == TokenEOF:
-			p.emitOrphanTrivia(parent, leadingComments, triviaRaw)
+			p.emitOrphanTrivia(parent, leadingComments, triviaRaw, orphan)
 			return nil
 
 		case tt == TokenLeftBracket || tt == TokenDoubleLeftBracket:
@@ -438,6 +476,9 @@ func (p *parser) parseKeyValue(leadingWS []byte, leadingComments [][]byte, trivi
 		Val: val,
 	}
 	kv.setRaw(kvRaw)
+	// The key-value span runs from the key's first byte to the value's last
+	// byte, excluding leading trivia, inline comment, and trailing newline.
+	kv.setSpan(Span{Start: keyNode.Span().Start, End: val.Span().End})
 	kv.nodeTrivia.LeadingWhitespace = leadingWS
 	kv.nodeTrivia.LeadingComments = leadingComments
 	kv.nodeTrivia.InlineComment = inlineComment
@@ -471,6 +512,9 @@ func (p *parser) parseKey() (*KeyNode, int, int, error) {
 	key.Parts = append(key.Parts, part)
 	key.RawParts = append(key.RawParts, rawPart)
 	key.Styles = append(key.Styles, style)
+	// parseSimpleKey consumes exactly one token; track the last key token so
+	// the span ends at the final key part (excluding trailing whitespace).
+	lastTok := p.tokens[p.pos-1]
 
 	// Additional dotted parts
 	for {
@@ -489,9 +533,11 @@ func (p *parser) parseKey() (*KeyNode, int, int, error) {
 		key.Parts = append(key.Parts, part)
 		key.RawParts = append(key.RawParts, rawPart)
 		key.Styles = append(key.Styles, style)
+		lastTok = p.tokens[p.pos-1]
 	}
 
 	key.setRaw(p.rawFromTokenRange(startPos, p.pos))
+	key.setSpan(Span{Start: tokenStart(firstTok), End: spanFromToken(lastTok).End})
 	return key, firstTok.Line, firstTok.Column, nil
 }
 
@@ -595,6 +641,7 @@ func (p *parser) parseStringValue() (Node, error) {
 	}
 	n := &StringNode{Val: decoded, Style: StringBasic}
 	n.setRaw(tok.Raw)
+	n.setSpan(spanFromToken(tok))
 	return n, nil
 }
 
@@ -603,6 +650,7 @@ func (p *parser) parseLiteralStringValue() (Node, error) {
 	decoded := decodeLiteralString(tok.Raw)
 	n := &StringNode{Val: decoded, Style: StringLiteral}
 	n.setRaw(tok.Raw)
+	n.setSpan(spanFromToken(tok))
 	return n, nil
 }
 
@@ -614,6 +662,7 @@ func (p *parser) parseMultiLineBasicStringValue() (Node, error) {
 	}
 	n := &StringNode{Val: decoded, Style: StringMultiLineBasic}
 	n.setRaw(tok.Raw)
+	n.setSpan(spanFromToken(tok))
 	return n, nil
 }
 
@@ -622,6 +671,7 @@ func (p *parser) parseMultiLineLiteralStringValue() (Node, error) {
 	decoded := decodeMultiLineLiteralString(tok.Raw)
 	n := &StringNode{Val: decoded, Style: StringMultiLineLiteral}
 	n.setRaw(tok.Raw)
+	n.setSpan(spanFromToken(tok))
 	return n, nil
 }
 
@@ -633,6 +683,7 @@ func (p *parser) parseIntegerValue() (Node, error) {
 	}
 	n := &IntegerNode{Val: val, Base: base}
 	n.setRaw(tok.Raw)
+	n.setSpan(spanFromToken(tok))
 	return n, nil
 }
 
@@ -644,6 +695,7 @@ func (p *parser) parseFloatValue() (Node, error) {
 	}
 	n := &FloatNode{Val: val}
 	n.setRaw(tok.Raw)
+	n.setSpan(spanFromToken(tok))
 	return n, nil
 }
 
@@ -652,6 +704,7 @@ func (p *parser) parseBooleanValue() (Node, error) {
 	val := string(tok.Raw) == "true"
 	n := &BooleanNode{Val: val}
 	n.setRaw(tok.Raw)
+	n.setSpan(spanFromToken(tok))
 	return n, nil
 }
 
@@ -663,6 +716,7 @@ func (p *parser) parseDateTimeValue() (Node, error) {
 	}
 	n := &DateTimeNode{Val: val}
 	n.setRaw(tok.Raw)
+	n.setSpan(spanFromToken(tok))
 	return n, nil
 }
 
@@ -674,6 +728,7 @@ func (p *parser) parseLocalDateTimeValue() (Node, error) {
 	}
 	n := &LocalDateTimeNode{Val: val}
 	n.setRaw(tok.Raw)
+	n.setSpan(spanFromToken(tok))
 	return n, nil
 }
 
@@ -685,6 +740,7 @@ func (p *parser) parseLocalDateValue() (Node, error) {
 	}
 	n := &LocalDateNode{Val: val}
 	n.setRaw(tok.Raw)
+	n.setSpan(spanFromToken(tok))
 	return n, nil
 }
 
@@ -696,12 +752,13 @@ func (p *parser) parseLocalTimeValue() (Node, error) {
 	}
 	n := &LocalTimeNode{Val: val}
 	n.setRaw(tok.Raw)
+	n.setSpan(spanFromToken(tok))
 	return n, nil
 }
 
 func (p *parser) parseArrayValue() (Node, error) {
 	startPos := p.pos
-	p.advance() // consume [
+	openTok := p.advance() // consume [
 
 	arr := &ArrayNode{}
 
@@ -714,8 +771,9 @@ func (p *parser) parseArrayValue() (Node, error) {
 			// Comments collected here belong after the last element (or are the
 			// only content in an empty array). Store them as trailing comments.
 			arr.TrailingComments = leadingComments
-			p.advance() // consume ]
+			closeTok := p.advance() // consume ]
 			arr.setRaw(p.rawFromTokenRange(startPos, p.pos))
+			arr.setSpan(Span{Start: tokenStart(openTok), End: spanFromToken(closeTok).End})
 			return arr, nil
 		}
 
@@ -779,7 +837,7 @@ func (p *parser) parseArrayValue() (Node, error) {
 
 func (p *parser) parseInlineTableValue() (Node, error) {
 	startPos := p.pos
-	p.advance() // consume {
+	openTok := p.advance() // consume {
 
 	tbl := &InlineTableNode{}
 	tracker := newDefinitionTracker()
@@ -787,8 +845,9 @@ func (p *parser) parseInlineTableValue() (Node, error) {
 	p.skipWhitespace()
 
 	if p.peekType() == TokenRightBrace {
-		p.advance() // consume }
+		closeTok := p.advance() // consume }
 		tbl.setRaw(p.rawFromTokenRange(startPos, p.pos))
+		tbl.setSpan(Span{Start: tokenStart(openTok), End: spanFromToken(closeTok).End})
 		return tbl, nil
 	}
 
@@ -818,6 +877,7 @@ func (p *parser) parseInlineTableValue() (Node, error) {
 			Key: keyNode,
 			Val: val,
 		}
+		kv.setSpan(Span{Start: keyNode.Span().Start, End: val.Span().End})
 
 		// Check for duplicate keys within the inline table
 		if err := tracker.defineKey(keyNode.Parts, kv, keyLine, keyCol); err != nil {
@@ -839,12 +899,13 @@ func (p *parser) parseInlineTableValue() (Node, error) {
 
 	p.skipWhitespace()
 
-	_, err := p.expect(TokenRightBrace)
+	closeTok, err := p.expect(TokenRightBrace)
 	if err != nil {
 		return nil, err
 	}
 
 	tbl.setRaw(p.rawFromTokenRange(startPos, p.pos))
+	tbl.setSpan(Span{Start: tokenStart(openTok), End: spanFromToken(closeTok).End})
 	return tbl, nil
 }
 

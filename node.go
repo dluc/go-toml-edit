@@ -68,10 +68,17 @@ type Node interface {
 	LeadingComments() []string
 	Raw() []byte
 
+	// Span returns the source range the node covered in the most recent
+	// Parse. Nodes created programmatically (edits, Marshal) return the
+	// zero Span (IsValid reports false). Edits do not update spans; see
+	// the Span type documentation for the exact policy.
+	Span() Span
+
 	// unexported methods restrict implementation to this package
 	setComment(comment string)
 	setLeadingComments(comments []string)
 	setRaw([]byte)
+	setSpan(Span)
 	isDirty() bool
 	markDirty()
 	trivia() *Trivia
@@ -82,6 +89,7 @@ type nodeBase struct {
 	raw        []byte
 	dirty      bool
 	nodeTrivia Trivia
+	span       Span
 }
 
 func (n *nodeBase) Raw() []byte {
@@ -90,6 +98,14 @@ func (n *nodeBase) Raw() []byte {
 
 func (n *nodeBase) setRaw(b []byte) {
 	n.raw = b
+}
+
+func (n *nodeBase) Span() Span {
+	return n.span
+}
+
+func (n *nodeBase) setSpan(s Span) {
+	n.span = s
 }
 
 func (n *nodeBase) isDirty() bool {
@@ -153,6 +169,8 @@ func (nullNode) SetLeadingComments([]string) {}
 func (nullNode) setLeadingComments([]string) {}
 func (nullNode) Raw() []byte                 { return nil }
 func (nullNode) setRaw([]byte)               {}
+func (nullNode) Span() Span                  { return Span{} }
+func (nullNode) setSpan(Span)                {}
 func (nullNode) isDirty() bool               { return false }
 func (nullNode) markDirty()                  {}
 func (nullNode) trivia() *Trivia             { return &Trivia{} }
