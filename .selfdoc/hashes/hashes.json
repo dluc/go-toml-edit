@@ -1,16 +1,18 @@
 {
+  "_hash_version": 3,
   "en/gen-index.md": {
     "content": "47fb2bef6c47aae02b3739c7ed4facd41672ee38da5103346e348783c56b6de0",
-    "description": "bb3cd9d34f014c0674a9285c25ee14b5b4abc5cf941f0d83594c301405e8f3b6"
+    "description": "576e72b5ee8acc176cebe57c20c08cea7cae6c43bfa4424d5c1b052411ec5813",
+    "seed_hash": "576e72b5ee8acc176cebe57c20c08cea7cae6c43bfa4424d5c1b052411ec5813"
   },
   "en/go-toml-edit.md": {
-    "content": "64285abaf990bb34d1ec6febe4e89768a27125251ce3361fe58e026fdb256b0d",
+    "content": "9b74a2dc4d47520c618428af8f81752aae71ffb3531d692c039e373b0389824a",
     "description": "cf9395bb046f8e182d82f646b67ab3f7f5919ad5187ac4e646cb479dfda63632",
-    "source_docstring": "70cfcbf93fbaa8eec3a1cd9c08c7d8cd59bb791625a166a30307d045142918f3"
+    "source_docstring": "e585086b6e7d754a297277cedeeaf6bef74e48b31df775957ce206f1b9e86efe"
   },
   "en/index.md": {
-    "content": "2ab69315a34995fe0a9e104e0ae0989026a41a3224510fc3ab64c492eec12516",
+    "content": "571b78161938139db0a79a2cc005156a62c77b0b0e445eba94fc43a221db2983",
     "description": "9b2cfc8fb2cdef184ce3cc02a8463aa859e1c4063a5182a7d9686a0be4a09ef8",
-    "source_docstring": "70cfcbf93fbaa8eec3a1cd9c08c7d8cd59bb791625a166a30307d045142918f3"
+    "source_docstring": "e585086b6e7d754a297277cedeeaf6bef74e48b31df775957ce206f1b9e86efe"
   }
 }
