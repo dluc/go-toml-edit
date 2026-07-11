@@ -30,6 +30,7 @@ Hybrid AST with byte ranges. Every node records its span in the original source.
 | `node.go` | 176 | Node interface, Trivia struct, temporal types (LocalDateTime, LocalDate, LocalTime) |
 | `node_types.go` | 175 | Concrete node structs for all TOML value types |
 | `path.go` | 145 | Path parser: dot-separated keys, bracket indices, quoting |
+| `span.go` | 57 | Position and Span types: 1-based line/column source ranges for nodes |
 | `cursor.go` | 132 | Fluent navigation API with accumulating errors |
 | `comments.go` | 129 | SetComment, SetLeadingComments helpers |
 | `diff.go` | 117 | Document comparison returning Added/Removed/Modified changes |
@@ -43,7 +44,8 @@ Hybrid AST with byte ranges. Every node records its span in the original source.
 - Single package: everything is in `tomledit`, no internal/ subpackages
 - Virtual node types (dottedKeyView, compoundTableView, arrayTableCollection) handle TOML's complex table semantics without exposing them in the public API
 - Path syntax supports: `server.host`, `array[0]`, `array[-1]`, `"key.with.dots"`
-- Node interface unifies all AST types: Type(), Value(), Comment(), LeadingComments(), Raw()
+- Node interface unifies all AST types: Type(), Value(), Comment(), LeadingComments(), Raw(), Span()
+- Spans reflect the most recent Parse: edits never recompute them; programmatically created nodes carry the zero (invalid) Span
 - Dirty tracking is per-node, not per-document, so only edited subtrees re-render
 
 ## Build and test

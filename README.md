@@ -57,7 +57,8 @@ go get github.com/smm-h/go-toml-edit
 | Round-trip editing | Yes | No | No |
 | Set/Delete/Rename API | Yes | No | No |
 | Unmarshal to struct | Yes | Yes | Yes |
-| Marshal from struct | No (v2) | Yes | Yes |
+| Marshal from Go values | Maps only (structs in v2) | Yes | Yes |
+| Position spans on AST nodes | Yes | No | No |
 | TOML 1.0 compliance | Full | Full | Full |
 | Formatter | Yes | No | No |
 | Document diffing | Yes | No | No |
@@ -130,6 +131,32 @@ doc.Walk(func(path string, node tomledit.Node) error {
 	return nil
 }, tomledit.WalkLeaves)
 ```
+
+### Position Spans
+
+Every AST node carries its source position from the most recent parse,
+enabling custom semantic validation (unknown keys, wrong types, out-of-range
+values) with precise line/column diagnostics:
+
+```go
+doc.Walk(func(path string, node tomledit.Node) error {
+	sp := node.Span() // 1-based line/column, byte columns
+	fmt.Printf("%s at %d:%d-%d:%d\n", path,
+		sp.Start.Line, sp.Start.Column, sp.End.Line, sp.End.Column)
+	return nil
+}, tomledit.WalkLeaves)
+```
+
+`Span()` is available on all nodes: tables and array-tables (covering only
+the `[header]`), key-value pairs (key through value), keys, all scalars,
+arrays, inline tables, and comments. `Span.End` is exclusive -- the position
+immediately after the node's last byte.
+
+**Span policy:** spans reflect the last `Parse`. Edit operations do not
+recompute them: nodes created programmatically (via `Set`, `Merge`,
+`Marshal`, ...) return the zero span (`Span.IsValid()` reports false), and
+edited nodes keep their parse-time spans. Re-parse the output of `Bytes()`
+when fresh positions are needed after editing.
 
 ### Array Iteration
 
