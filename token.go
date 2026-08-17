@@ -71,6 +71,7 @@ func (t TokenType) String() string {
 type Token struct {
 	Type   TokenType
 	Raw    []byte // exact bytes from source
+	Offset int    // byte offset of Raw within the source, 0-based
 	Line   int    // 1-based
 	Column int    // 1-based
 }

@@ -239,20 +239,12 @@ func resolveKeyInArrayTable(doc *DocumentNode, scope *ArrayTableNode, currentTab
 	// Bug 1 fix: Check for compound sub-tables scoped to this array entry
 	var compoundTables []*TableNode
 	var compoundArrayTbls []*ArrayTableNode
-	for i := scopeIdx + 1; i < len(doc.Children); i++ {
-		child := doc.Children[i]
-		if at, ok := child.(*ArrayTableNode); ok {
-			if pathsEqual(at.KeyPath, scope.KeyPath) {
-				break
-			}
-			if hasPrefix(at.KeyPath, targetPath) && len(at.KeyPath) > len(targetPath) {
-				compoundArrayTbls = append(compoundArrayTbls, at)
-			}
-		}
-		if tbl, ok := child.(*TableNode); ok {
-			if hasPrefix(tbl.KeyPath, targetPath) && len(tbl.KeyPath) > len(targetPath) {
-				compoundTables = append(compoundTables, tbl)
-			}
+	for _, i := range scopedDescendantIndices(doc, scopeIdx, scope.KeyPath, targetPath) {
+		switch n := doc.Children[i].(type) {
+		case *TableNode:
+			compoundTables = append(compoundTables, n)
+		case *ArrayTableNode:
+			compoundArrayTbls = append(compoundArrayTbls, n)
 		}
 	}
 	if len(compoundTables) > 0 || len(compoundArrayTbls) > 0 {
@@ -265,6 +257,40 @@ func resolveKeyInArrayTable(doc *DocumentNode, scope *ArrayTableNode, currentTab
 	}
 
 	return nil, nil, fmt.Errorf("key %q not found in array table [[%s]]", key, joinPath(scope.KeyPath))
+}
+
+// scopedDescendantIndices scans doc.Children starting at scopeIdx+1 for
+// TableNode/ArrayTableNode children whose KeyPath is a strict extension of
+// prefixPath (i.e. nested somewhere below it), stopping at the next
+// ArrayTableNode whose KeyPath equals arrayKeyPath -- that node marks the
+// start of the next sibling entry of the same array-of-tables and is not
+// included. It returns the matching indices in ascending order.
+//
+// This captures every node scoped to one specific array-of-tables entry:
+// used both to resolve a sub-key's compound path (resolveKeyInArrayTable)
+// and to find everything that must be deleted alongside that entry
+// (deleteIndexFromParent's *arrayTableCollection case).
+func scopedDescendantIndices(doc *DocumentNode, scopeIdx int, arrayKeyPath, prefixPath []string) []int {
+	var indices []int
+	for i := scopeIdx + 1; i < len(doc.Children); i++ {
+		child := doc.Children[i]
+		if at, ok := child.(*ArrayTableNode); ok && pathsEqual(at.KeyPath, arrayKeyPath) {
+			break
+		}
+		var keyPath []string
+		switch n := child.(type) {
+		case *TableNode:
+			keyPath = n.KeyPath
+		case *ArrayTableNode:
+			keyPath = n.KeyPath
+		default:
+			continue
+		}
+		if hasPrefix(keyPath, prefixPath) && len(keyPath) > len(prefixPath) {
+			indices = append(indices, i)
+		}
+	}
+	return indices
 }
 
 // resolveKeyInInlineTable searches an inline table's children for a key.

@@ -408,14 +408,33 @@ func deleteIndexFromParent(parent Node, index int) error {
 		if err != nil {
 			return nil
 		}
-		// Remove the ArrayTableNode from the document's children.
+		// Remove the ArrayTableNode and every sub-table/array-table scoped
+		// to this specific entry (e.g. [x.sub], [x.sub.deep]) -- otherwise
+		// those orphaned nodes are left in front of the next [[x]] entry,
+		// producing output that either fails to re-parse or silently
+		// re-scopes to the wrong entry.
 		target := p.entries[idx]
+		scopeIdx := -1
 		for i, child := range p.doc.Children {
 			if child == target {
-				p.doc.Children = append(p.doc.Children[:i], p.doc.Children[i+1:]...)
+				scopeIdx = i
 				break
 			}
 		}
+		if scopeIdx == -1 {
+			return nil
+		}
+		toRemove := map[int]bool{scopeIdx: true}
+		for _, i := range scopedDescendantIndices(p.doc, scopeIdx, target.KeyPath, target.KeyPath) {
+			toRemove[i] = true
+		}
+		kept := p.doc.Children[:0:0]
+		for i, child := range p.doc.Children {
+			if !toRemove[i] {
+				kept = append(kept, child)
+			}
+		}
+		p.doc.Children = kept
 		return nil
 	case *KeyValueNode:
 		return deleteIndexFromParent(p.Val, index)

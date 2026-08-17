@@ -18,9 +18,30 @@ import (
 func (d *DocumentNode) Bytes() []byte {
 	var buf []byte
 	for _, child := range d.Children {
+		// A [table] or [[array-table]] header must start on its own line.
+		// If the bytes emitted so far are non-empty and don't already end
+		// in a newline, insert one before the header -- otherwise the
+		// header glues onto the end of the previous line, producing
+		// invalid, unparseable TOML. This only matters for headers: other
+		// node kinds (key-values, comments) always carry their own
+		// newline via trivia/raw bytes.
+		if isHeaderNode(child) && len(buf) > 0 && buf[len(buf)-1] != '\n' {
+			buf = append(buf, '\n')
+		}
 		buf = append(buf, serializeNode(child)...)
 	}
 	return buf
+}
+
+// isHeaderNode reports whether n serializes to a [table] or [[array-table]]
+// header line.
+func isHeaderNode(n Node) bool {
+	switch n.(type) {
+	case *TableNode, *ArrayTableNode:
+		return true
+	default:
+		return false
+	}
 }
 
 // serializeNode dispatches serialization for a single node. Clean nodes emit

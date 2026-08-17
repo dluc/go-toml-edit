@@ -30,11 +30,17 @@ func Parse(src []byte) (*DocumentNode, error) {
 	return p.parseDocument()
 }
 
+// maxNestingDepth bounds how deeply arrays and inline tables may nest.
+// Beyond this, recursive descent would risk a fatal (unrecoverable) Go stack
+// overflow, so the parser returns a ParseError instead.
+const maxNestingDepth = 2048
+
 // parser is the internal recursive-descent parser.
 type parser struct {
 	tokens []Token
 	pos    int
 	src    []byte
+	depth  int
 }
 
 // --- token helpers ---
@@ -757,6 +763,12 @@ func (p *parser) parseLocalTimeValue() (Node, error) {
 }
 
 func (p *parser) parseArrayValue() (Node, error) {
+	p.depth++
+	defer func() { p.depth-- }()
+	if p.depth > maxNestingDepth {
+		return nil, p.errorf("maximum nesting depth (%d) exceeded", maxNestingDepth)
+	}
+
 	startPos := p.pos
 	openTok := p.advance() // consume [
 
@@ -836,6 +848,12 @@ func (p *parser) parseArrayValue() (Node, error) {
 }
 
 func (p *parser) parseInlineTableValue() (Node, error) {
+	p.depth++
+	defer func() { p.depth-- }()
+	if p.depth > maxNestingDepth {
+		return nil, p.errorf("maximum nesting depth (%d) exceeded", maxNestingDepth)
+	}
+
 	startPos := p.pos
 	openTok := p.advance() // consume {
 
@@ -1002,15 +1020,25 @@ func (p *parser) collectArrayInlineTrivia() (ws []byte, comment []byte) {
 	return
 }
 
+// rawFromTokenRange returns the exact source bytes spanned by tokens
+// [startIdx, endIdx). Tokens are contiguous slices of the same source buffer,
+// so the span is an O(1) subslice of p.src rather than a per-token copy.
+// The returned slice aliases the source and must not be mutated.
 func (p *parser) rawFromTokenRange(startIdx, endIdx int) []byte {
 	if startIdx >= endIdx {
 		return nil
 	}
-	var raw []byte
-	for i := startIdx; i < endIdx && i < len(p.tokens); i++ {
-		raw = append(raw, p.tokens[i].Raw...)
+	// O(1) clamp: preserves the bounds invariant of the previous loop-based
+	// implementation, which guarded every index with i < len(p.tokens).
+	if endIdx > len(p.tokens) {
+		endIdx = len(p.tokens)
 	}
-	return raw
+	if startIdx >= endIdx {
+		return nil
+	}
+	lo := p.tokens[startIdx].Offset
+	hi := p.tokens[endIdx-1].Offset + len(p.tokens[endIdx-1].Raw)
+	return p.src[lo:hi]
 }
 
 // --- string decoding ---

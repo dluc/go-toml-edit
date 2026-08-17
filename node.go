@@ -66,6 +66,10 @@ type Node interface {
 	Value() any
 	Comment() string
 	LeadingComments() []string
+
+	// Raw returns a copy of the node's original source bytes. Mutating the
+	// returned slice does not affect the document; use the Set and edit APIs
+	// to modify a value.
 	Raw() []byte
 
 	// Span returns the source range the node covered in the most recent
@@ -93,7 +97,7 @@ type nodeBase struct {
 }
 
 func (n *nodeBase) Raw() []byte {
-	return n.raw
+	return append([]byte(nil), n.raw...)
 }
 
 func (n *nodeBase) setRaw(b []byte) {

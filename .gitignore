@@ -6,6 +6,7 @@ __pycache__/
 coverage/
 dist/
 *.egg-info/
+.data/
 .rlsbl-notes-*.tmp
 .credentials.json
 .*-cache.json

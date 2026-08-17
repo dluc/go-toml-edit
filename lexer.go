@@ -85,6 +85,7 @@ func (l *lexer) emitAt(typ TokenType, start, end, line, col int) {
 	l.tokens = append(l.tokens, Token{
 		Type:   typ,
 		Raw:    l.src[start:end],
+		Offset: start,
 		Line:   line,
 		Column: col,
 	})
