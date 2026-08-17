@@ -18,6 +18,18 @@ import (
 // Returns a *ParseError on any lexing or parsing error, including duplicate
 // key detection and invalid TOML syntax.
 func Parse(src []byte) (*DocumentNode, error) {
+	// A UTF-8 byte order mark (0xEF 0xBB 0xBF) is only meaningful at the
+	// very start of the input. Strip it before lexing/parsing so the rest
+	// of the pipeline is unchanged, but remember it so Bytes can re-emit it
+	// -- this library preserves round-trip fidelity rather than silently
+	// dropping the BOM. A BOM anywhere else in the source is not special
+	// and is left for the lexer to reject as an unexpected character.
+	var leadingBOM []byte
+	if hasUTF8BOM(src) {
+		leadingBOM = src[:len(utf8BOMBytes)]
+		src = src[len(utf8BOMBytes):]
+	}
+
 	tokens, err := lex(src)
 	if err != nil {
 		return nil, err
@@ -27,7 +39,21 @@ func Parse(src []byte) (*DocumentNode, error) {
 		pos:    0,
 		src:    src,
 	}
-	return p.parseDocument()
+	doc, err := p.parseDocument()
+	if err != nil {
+		return nil, err
+	}
+	doc.leadingBOM = leadingBOM
+	return doc, nil
+}
+
+// utf8BOMBytes is the UTF-8 encoding of U+FEFF (byte order mark).
+var utf8BOMBytes = []byte{0xEF, 0xBB, 0xBF}
+
+// hasUTF8BOM reports whether src begins with a UTF-8 byte order mark.
+func hasUTF8BOM(src []byte) bool {
+	return len(src) >= len(utf8BOMBytes) &&
+		src[0] == utf8BOMBytes[0] && src[1] == utf8BOMBytes[1] && src[2] == utf8BOMBytes[2]
 }
 
 // maxNestingDepth bounds how deeply arrays and inline tables may nest.

@@ -17,6 +17,7 @@ import (
 // their original formatting.
 func (d *DocumentNode) Bytes() []byte {
 	var buf []byte
+	buf = append(buf, d.leadingBOM...)
 	for _, child := range d.Children {
 		// A [table] or [[array-table]] header must start on its own line.
 		// If the bytes emitted so far are non-empty and don't already end

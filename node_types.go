@@ -26,6 +26,12 @@ const (
 type DocumentNode struct {
 	nodeBase
 	Children []Node
+
+	// leadingBOM holds a UTF-8 byte order mark (0xEF 0xBB 0xBF) found at the
+	// very start of the parsed source, if any. It is nil for documents
+	// without a leading BOM or created programmatically. Bytes prepends it
+	// so a leading BOM round-trips byte-for-byte instead of being dropped.
+	leadingBOM []byte
 }
 
 func (n *DocumentNode) Type() NodeType { return NodeDocument }
