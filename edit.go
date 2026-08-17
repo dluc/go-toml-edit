@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -217,6 +218,7 @@ func setKeyInChildren(children *[]Node, key string, valNode Node, markParentDirt
 	for _, child := range *children {
 		if kv, ok := child.(*KeyValueNode); ok {
 			if len(kv.Key.Parts) == 1 && kv.Key.Parts[0] == key {
+				carryStringStyle(kv.Val, valNode)
 				kv.Val = valNode
 				kv.markDirty()
 				return nil
@@ -227,6 +229,85 @@ func setKeyInChildren(children *[]Node, key string, valNode Node, markParentDirt
 	kv := newKeyValueNode(key, valNode)
 	*children = append(*children, kv)
 	return nil
+}
+
+// carryStringStyle preserves the old string node's quoting style onto the
+// replacement node, so that Set doesn't silently flip a literal/multi-line
+// value to basic quoting. It only carries the style when both the old and
+// new values are strings, and only when the new value can be safely
+// represented in the old style -- otherwise the replacement keeps its
+// default StringBasic style (set by valueToNode), which can always
+// represent any string via escaping. This guards the non-negotiable
+// invariant that Bytes() output must always be valid, re-parseable TOML.
+func carryStringStyle(oldVal, newVal Node) {
+	oldStr, ok := oldVal.(*StringNode)
+	if !ok {
+		return
+	}
+	newStr, ok := newVal.(*StringNode)
+	if !ok {
+		return
+	}
+	if canRepresentString(newStr.Val, oldStr.Style) {
+		newStr.Style = oldStr.Style
+	}
+}
+
+// canRepresentString reports whether val can be safely rendered in the given
+// string style without falling back to a different style. Conservative by
+// design: when in doubt, it returns false so the caller falls back to
+// StringBasic rather than risk emitting invalid TOML.
+func canRepresentString(val string, style StringStyle) bool {
+	switch style {
+	case StringBasic:
+		// Basic strings can represent any string via escaping.
+		return true
+
+	case StringLiteral:
+		// No escapes available: no apostrophe, no line breaks, no control
+		// characters other than tab.
+		if strings.ContainsRune(val, '\'') {
+			return false
+		}
+		for _, r := range val {
+			if r == '\n' || r == '\r' {
+				return false
+			}
+			if r != '\t' && (r < 0x20 || r == 0x7F) {
+				return false
+			}
+		}
+		return true
+
+	case StringMultiLineLiteral:
+		// No escapes available: the content must not contain the closing
+		// delimiter sequence, must not end in a quote (which would collide
+		// with the closing delimiter), and must not contain control
+		// characters other than tab/newline.
+		if strings.Contains(val, "'''") {
+			return false
+		}
+		if strings.HasSuffix(val, "'") {
+			return false
+		}
+		for _, r := range val {
+			if r == '\t' || r == '\n' {
+				continue
+			}
+			if r < 0x20 || r == 0x7F {
+				return false
+			}
+		}
+		return true
+
+	case StringMultiLineBasic:
+		// renderMultiLineBasicString fully escapes quotes, backslashes, and
+		// control characters, so any value is representable.
+		return true
+
+	default:
+		return false
+	}
 }
 
 // setIndexInParent replaces an element at the given index in an array.

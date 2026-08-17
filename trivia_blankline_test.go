@@ -40,7 +40,10 @@ func TestSet_PreservesBlankLineAboveEditedKey(t *testing.T) {
 		t.Fatalf("Set failed: %v", err)
 	}
 	got := string(doc.Bytes())
-	want := "a = 1\n\nfoo = \"new\"\n"
+	// foo's original literal ('...') quote style is preserved by the #5c fix
+	// (see edit_string_style_test.go); this test's own concern is the blank
+	// line above foo, which must survive regardless of quote style.
+	want := "a = 1\n\nfoo = 'new'\n"
 	if got != want {
 		t.Errorf("Bytes() = %q, want %q", got, want)
 	}
