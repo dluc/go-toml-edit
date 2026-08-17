@@ -636,10 +636,14 @@ func (d *DocumentNode) NewTable(path string) error {
 	return nil
 }
 
-// NewArrayTable appends a new [[array-table]] entry at the given path.
-// Multiple entries with the same path are valid in TOML and represent
-// successive elements of the array. The path must consist of key segments
-// only (no array indices).
+// NewArrayTable inserts a new [[array-table]] entry at the given path. If
+// entries with this path already exist, the new entry is placed right after
+// the last existing entry and everything scoped to it (nested sub-tables
+// such as [x.sub] or [[x.y]]), keeping the whole group together instead of
+// scattering entries across the document. If no entry exists yet, the new
+// entry is appended at the end of the document. Multiple entries with the
+// same path are valid in TOML and represent successive elements of the
+// array. The path must consist of key segments only (no array indices).
 func (d *DocumentNode) NewArrayTable(path string) error {
 	segments, err := parsePath(path)
 	if err != nil {
@@ -663,7 +667,29 @@ func (d *DocumentNode) NewArrayTable(path string) error {
 	atbl.markDirty()
 	atbl.nodeTrivia.TrailingNewline = []byte("\n")
 
-	d.Children = append(d.Children, atbl)
+	// Find the last existing entry for this path, if any, and insert right
+	// after it and its scoped descendants (reusing the same helper the
+	// array-table delete path uses to compute an entry's full extent).
+	lastIdx := -1
+	for i, child := range d.Children {
+		if at, ok := child.(*ArrayTableNode); ok && pathsEqual(at.KeyPath, keyPath) {
+			lastIdx = i
+		}
+	}
+
+	insertAt := len(d.Children)
+	if lastIdx >= 0 {
+		insertAt = lastIdx + 1
+		if scoped := scopedDescendantIndices(d, lastIdx, keyPath, keyPath); len(scoped) > 0 {
+			insertAt = scoped[len(scoped)-1] + 1
+		}
+	}
+
+	children := make([]Node, 0, len(d.Children)+1)
+	children = append(children, d.Children[:insertAt]...)
+	children = append(children, atbl)
+	children = append(children, d.Children[insertAt:]...)
+	d.Children = children
 	return nil
 }
 

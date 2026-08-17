@@ -38,6 +38,12 @@ func (n *DocumentNode) Type() NodeType { return NodeDocument }
 func (n *DocumentNode) Value() any     { return n.Children }
 
 // TableNode represents a [table] header and its children.
+//
+// TableNode is normally created via DocumentNode.NewTable, which places it
+// correctly in the document and marks it dirty so it renders from KeyPath.
+// A directly-constructed TableNode (e.g. &TableNode{KeyPath: ...}) has no
+// raw bytes and is not marked dirty; serialization still renders its header
+// from KeyPath in that case, so the node does not vanish from the output.
 type TableNode struct {
 	nodeBase
 	KeyPath  []string
@@ -48,6 +54,13 @@ func (n *TableNode) Type() NodeType { return NodeTable }
 func (n *TableNode) Value() any     { return n.Children }
 
 // ArrayTableNode represents an [[array-table]] header and its children.
+//
+// ArrayTableNode is normally created via DocumentNode.NewArrayTable, which
+// places it correctly in the document and marks it dirty so it renders from
+// KeyPath. A directly-constructed ArrayTableNode (e.g.
+// &ArrayTableNode{KeyPath: ...}) has no raw bytes and is not marked dirty;
+// serialization still renders its header from KeyPath in that case, so the
+// node does not vanish from the output.
 type ArrayTableNode struct {
 	nodeBase
 	KeyPath  []string

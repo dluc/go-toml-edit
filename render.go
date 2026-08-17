@@ -51,7 +51,7 @@ func serializeNode(n Node) []byte {
 	switch node := n.(type) {
 	case *TableNode:
 		var buf []byte
-		if !node.isDirty() {
+		if !node.isDirty() && len(node.Raw()) > 0 {
 			buf = append(buf, node.Raw()...)
 		} else {
 			buf = append(buf, renderTableHeader(node)...)
@@ -63,7 +63,7 @@ func serializeNode(n Node) []byte {
 
 	case *ArrayTableNode:
 		var buf []byte
-		if !node.isDirty() {
+		if !node.isDirty() && len(node.Raw()) > 0 {
 			buf = append(buf, node.Raw()...)
 		} else {
 			buf = append(buf, renderArrayTableHeader(node)...)
