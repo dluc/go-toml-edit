@@ -60,11 +60,25 @@ func TestSet_ExistingValue(t *testing.T) {
 		t.Errorf("expected \"newhost\", got %q", val)
 	}
 
-	// Verify the comment at the top is preserved.
-	out := string(doc.Bytes())
-	if !strings.Contains(out, "# Config file") {
-		t.Error("leading comment was lost after Set")
-	}
+	// Verify the surrounding formatting (leading comment, blank lines,
+	// unrelated sections) is preserved exactly -- not just that a
+	// substring survived.
+	assertExactAndReparse(t, doc, `# Config file
+[server]
+host = "newhost"
+port = 8080
+
+[server.database]
+name = "mydb"
+
+[[products]]
+name = "Widget"
+price = 9.99
+
+[[products]]
+name = "Gadget"
+price = 19.99
+`)
 
 	// Round-trip.
 	doc2 := roundTrip(t, doc)
@@ -557,12 +571,28 @@ func TestNewArrayTable_Append(t *testing.T) {
 		t.Fatalf("NewArrayTable returned error: %v", err)
 	}
 
-	out := string(doc.Bytes())
-	// Should have three [[products]] sections.
-	count := strings.Count(out, "[[products]]")
-	if count != 3 {
-		t.Errorf("expected 3 [[products]] sections, got %d in:\n%s", count, out)
-	}
+	// Assert the exact output: the new [[products]] entry lands right
+	// after the last existing [[products]] block (option (b) placement),
+	// with no stray blank line or corrupted trailing section. A bare
+	// occurrence count would pass even if the new entry landed in the
+	// wrong place or the surrounding bytes were mangled.
+	assertExactAndReparse(t, doc, `# Config file
+[server]
+host = "localhost"
+port = 8080
+
+[server.database]
+name = "mydb"
+
+[[products]]
+name = "Widget"
+price = 9.99
+
+[[products]]
+name = "Gadget"
+price = 19.99
+[[products]]
+`)
 	roundTrip(t, doc)
 }
 
@@ -596,11 +626,28 @@ func TestNewArrayTable_MultipleAppends(t *testing.T) {
 		}
 	}
 
-	out := string(doc.Bytes())
-	count := strings.Count(out, "[[products]]")
-	if count != 5 { // 2 original + 3 new
-		t.Errorf("expected 5 [[products]] sections, got %d", count)
-	}
+	// Exact bytes: three successive appends must each land after the
+	// previous one (still within the products block), not scattered or
+	// duplicated elsewhere in the document.
+	assertExactAndReparse(t, doc, `# Config file
+[server]
+host = "localhost"
+port = 8080
+
+[server.database]
+name = "mydb"
+
+[[products]]
+name = "Widget"
+price = 9.99
+
+[[products]]
+name = "Gadget"
+price = 19.99
+[[products]]
+[[products]]
+[[products]]
+`)
 	roundTrip(t, doc)
 }
 
