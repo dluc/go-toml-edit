@@ -55,6 +55,16 @@ type Trivia struct {
 	LeadingComments   [][]byte // each is a full "# ...\n" line
 	InlineComment     []byte   // "# ..." after value on same line
 	TrailingNewline   []byte
+
+	// LeadingRaw holds the exact original source bytes of the entire
+	// leading trivia block (blank lines, comments, and leading whitespace,
+	// in original order) as consumed by the parser. LeadingComments and
+	// LeadingWhitespace do not capture blank-line runs, so once a node is
+	// dirtied, renderTrivia prefers LeadingRaw (when present) to preserve
+	// blank lines exactly. It is nil for programmatically created nodes,
+	// and is cleared whenever leading comments are explicitly rewritten
+	// (SetLeadingComments), since the raw bytes would then no longer match.
+	LeadingRaw []byte
 }
 
 // Node is the interface implemented by all AST nodes.
@@ -150,6 +160,10 @@ func (n *nodeBase) SetLeadingComments(comments []string) {
 	for i, c := range comments {
 		n.nodeTrivia.LeadingComments[i] = []byte(c)
 	}
+	// The raw bytes captured at parse time no longer match the rewritten
+	// comments; fall back to reconstructing from LeadingComments/
+	// LeadingWhitespace in renderTrivia.
+	n.nodeTrivia.LeadingRaw = nil
 	n.dirty = true
 }
 

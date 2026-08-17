@@ -626,6 +626,15 @@ func renderComment(n *CommentNode) []byte {
 // renderTrivia emits the leading trivia (comments and whitespace) for a dirty node.
 func renderTrivia(n Node) []byte {
 	t := n.trivia()
+	// LeadingRaw carries the exact original leading-trivia bytes (blank
+	// lines, comments, and leading whitespace, in original order) as
+	// captured by the parser. Prefer it so blank-line runs -- which
+	// LeadingComments/LeadingWhitespace cannot represent -- survive once
+	// the node is dirtied by an edit. It is nil for programmatically
+	// created nodes or after SetLeadingComments rewrites the comments.
+	if len(t.LeadingRaw) > 0 {
+		return append([]byte(nil), t.LeadingRaw...)
+	}
 	var buf []byte
 	for _, c := range t.LeadingComments {
 		buf = append(buf, c...)

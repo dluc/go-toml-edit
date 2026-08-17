@@ -99,6 +99,7 @@ func (p *parser) collectLeadingTrivia() (leadingWS []byte, leadingComments [][]b
 
 	var accumulated []byte // all bytes consumed
 	var pendingWS []byte   // whitespace not yet assigned
+	var blankBuf []byte    // blank-line bytes consumed since the last comment (or start)
 
 	// track records the span of every consumed trivia token so orphan
 	// CommentNodes (emitted at end of input) can carry positions.
@@ -125,6 +126,8 @@ func (p *parser) collectLeadingTrivia() (leadingWS []byte, leadingComments [][]b
 			// The pending whitespace + this newline is a blank line
 			accumulated = append(accumulated, pendingWS...)
 			accumulated = append(accumulated, tok.Raw...)
+			blankBuf = append(blankBuf, pendingWS...)
+			blankBuf = append(blankBuf, tok.Raw...)
 			pendingWS = nil
 			continue
 
@@ -146,12 +149,21 @@ func (p *parser) collectLeadingTrivia() (leadingWS []byte, leadingComments [][]b
 			}
 			accumulated = append(accumulated, commentLine...)
 			leadingComments = append(leadingComments, commentLine)
+			// Record (and reset) any blank-line run that preceded this
+			// comment, so an orphan CommentNode built from this comment
+			// can still reproduce those blank lines byte-exactly.
+			orphan.precedingBlanks = append(orphan.precedingBlanks, blankBuf)
+			blankBuf = nil
 			continue
 
 		default:
 			// Not trivia. pendingWS is the leading whitespace for the content node.
 			leadingWS = pendingWS
 			raw = append(accumulated, pendingWS...)
+			// Any blank-line run since the last comment (or since the
+			// start, if there were no comments) that wasn't consumed by a
+			// following comment -- e.g. trailing blank lines at EOF.
+			orphan.trailingBlank = blankBuf
 			return
 		}
 	}
@@ -163,6 +175,15 @@ func (p *parser) collectLeadingTrivia() (leadingWS []byte, leadingComments [][]b
 type orphanTrivia struct {
 	commentSpans []Span // parallel to leadingComments; each covers only the '#...' token
 	span         Span   // the entire consumed trivia region; zero if nothing was consumed
+
+	// precedingBlanks is parallel to leadingComments: precedingBlanks[i]
+	// holds the blank-line bytes (if any) that immediately preceded
+	// leadingComments[i], so byte-exact reconstruction doesn't have to
+	// discard blank lines interleaved between orphan comments.
+	precedingBlanks [][]byte
+	// trailingBlank holds blank-line bytes left over after the last
+	// comment (or all blank bytes, if there were no comments at all).
+	trailingBlank []byte
 }
 
 // consumeInlineTrivia consumes optional whitespace + comment on the same line
@@ -243,11 +264,24 @@ func (p *parser) emitOrphanTrivia(parent interface{ addChild(Node) }, comments [
 	if len(comments) == 0 && len(raw) == 0 {
 		return
 	}
-	// If we have comment lines, emit them as CommentNodes
+	// If we have comment lines, emit them as CommentNodes. Blank-line runs
+	// that preceded a comment (or trail after the last one) are folded
+	// into that comment node's raw bytes -- rather than emitted as
+	// separate nodes -- so byte-exact round-tripping doesn't drop blank
+	// lines while leaving each CommentNode's Text/Span describing only
+	// its own comment line, and without changing child counts/positions
+	// that existing consumers rely on.
 	if len(comments) > 0 {
 		for i, c := range comments {
+			full := c
+			if i < len(orphan.precedingBlanks) && len(orphan.precedingBlanks[i]) > 0 {
+				full = append(append([]byte(nil), orphan.precedingBlanks[i]...), full...)
+			}
+			if i == len(comments)-1 && len(orphan.trailingBlank) > 0 {
+				full = append(append([]byte(nil), full...), orphan.trailingBlank...)
+			}
 			cn := &CommentNode{Text: string(c)}
-			cn.setRaw(c)
+			cn.setRaw(full)
 			if i < len(orphan.commentSpans) {
 				cn.setSpan(orphan.commentSpans[i])
 			}
@@ -330,6 +364,7 @@ func (p *parser) parseTable(leadingWS []byte, leadingComments [][]byte, triviaRa
 	tbl.nodeTrivia.LeadingComments = leadingComments
 	tbl.nodeTrivia.InlineComment = inlineComment
 	tbl.nodeTrivia.TrailingNewline = trailingNL
+	tbl.nodeTrivia.LeadingRaw = triviaRaw
 
 	// Check for redefinition
 	if err := tracker.defineTable(keyPath, tbl, keyLine, keyCol); err != nil {
@@ -395,6 +430,7 @@ func (p *parser) parseArrayTable(leadingWS []byte, leadingComments [][]byte, tri
 	atbl.nodeTrivia.LeadingComments = leadingComments
 	atbl.nodeTrivia.InlineComment = inlineComment
 	atbl.nodeTrivia.TrailingNewline = trailingNL
+	atbl.nodeTrivia.LeadingRaw = triviaRaw
 
 	// Check for redefinition
 	if err := tracker.defineArrayTable(keyPath, atbl, keyLine, keyCol); err != nil {
@@ -489,6 +525,7 @@ func (p *parser) parseKeyValue(leadingWS []byte, leadingComments [][]byte, trivi
 	kv.nodeTrivia.LeadingComments = leadingComments
 	kv.nodeTrivia.InlineComment = inlineComment
 	kv.nodeTrivia.TrailingNewline = trailingNL
+	kv.nodeTrivia.LeadingRaw = triviaRaw
 
 	// Track definition
 	fullPath := append(parentPath, keyNode.Parts...)
