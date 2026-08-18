@@ -36,6 +36,19 @@ func (d *DocumentNode) setInternal(path string, value any, create bool) error {
 		return fmt.Errorf("empty path")
 	}
 
+	// Reject -- before making any change -- an attempt to set a key whose
+	// full path already names an existing [table] or [[array-table]].
+	// Without this check, setKeyInChildren's search (below) only looks for
+	// a sibling *KeyValueNode* with a matching key and is blind to a
+	// same-named *TableNode*/*ArrayTableNode*, so it falls through to
+	// appending a brand-new top-level KV. That KV then serializes directly
+	// after the still-open table header with no intervening header, so on
+	// re-parse it is silently swallowed as a *nested* key inside that table
+	// instead of the new top-level value the caller asked for (BUG H-1).
+	if kind, ok := d.collidesWithTable(segments); ok {
+		return fmt.Errorf("cannot set key %q: already defined as a %s", path, kind)
+	}
+
 	// The last segment is the target key/index to set.
 	parentSegs := segments[:len(segments)-1]
 	lastSeg := segments[len(segments)-1]
@@ -60,6 +73,74 @@ func (d *DocumentNode) setInternal(path string, value any, create bool) error {
 	default:
 		return fmt.Errorf("unknown segment type")
 	}
+}
+
+// collidesWithTable reports whether the full path (built from segments,
+// which must consist entirely of key segments -- an index anywhere in the
+// path can never match a table's KeyPath) matches the exact KeyPath of an
+// existing *TableNode or *ArrayTableNode in the document's top-level
+// children. All tables and array-tables -- at any nesting depth -- are
+// stored flat in d.Children with a compound KeyPath (mirroring how
+// resolveKeyInDocument/resolveKeyInTable/etc. already look them up), so a
+// single flat scan is sufficient to catch a collision regardless of where
+// in the document the target path lives.
+func (d *DocumentNode) collidesWithTable(segments []pathSegment) (kind string, ok bool) {
+	keyPath := make([]string, 0, len(segments))
+	for _, seg := range segments {
+		if seg.Type != keySegment {
+			return "", false
+		}
+		keyPath = append(keyPath, seg.Key)
+	}
+	return d.collidesWithTableAtPath(keyPath)
+}
+
+// collidesWithTableAtPath is collidesWithTable's path-based core: it reports
+// whether keyPath matches the exact KeyPath of an existing *TableNode or
+// *ArrayTableNode in the document's top-level children. Factored out so
+// callers that already have a built []string key path (NewTable,
+// NewArrayTable, keyPathExistsAsAnyKind) don't need to round-trip through
+// []pathSegment just to reuse the scan.
+func (d *DocumentNode) collidesWithTableAtPath(keyPath []string) (kind string, ok bool) {
+	for _, child := range d.Children {
+		switch n := child.(type) {
+		case *TableNode:
+			if pathsEqual(n.KeyPath, keyPath) {
+				return "table", true
+			}
+		case *ArrayTableNode:
+			if pathsEqual(n.KeyPath, keyPath) {
+				return "array table", true
+			}
+		}
+	}
+	return "", false
+}
+
+// keyPathExistsAsAnyKind reports whether keyPath already names an existing
+// top-level node in the document, regardless of its kind: a *TableNode, an
+// *ArrayTableNode, or a top-level *KeyValueNode (matched against its full,
+// possibly dotted, key). NewTable, NewArrayTable, and Rename each used to
+// check only for a collision against their OWN node kind (or, in Rename's
+// case, only against sibling *KeyValueNode*s) -- so creating/renaming onto
+// a path that already existed as a *different* kind silently produced a
+// document with two top-level definitions for the same key path. That
+// serializes to TOML the package's own parser then rejects as a
+// redefinition, i.e. a nil error paired with unparseable output (BUG H-2,
+// see audit_repro_test.go). This helper centralizes the cross-kind check so
+// all three entry points can reject the collision before any mutation.
+func keyPathExistsAsAnyKind(d *DocumentNode, keyPath []string) (kind string, ok bool) {
+	if kind, ok := d.collidesWithTableAtPath(keyPath); ok {
+		return kind, ok
+	}
+	for _, child := range d.Children {
+		if kv, ok := child.(*KeyValueNode); ok {
+			if pathsEqual(kv.Key.Parts, keyPath) {
+				return "key-value", true
+			}
+		}
+	}
+	return "", false
 }
 
 // resolveParentForEdit resolves the parent container for an edit operation.
@@ -550,7 +631,40 @@ func (d *DocumentNode) Rename(path string, newKey string) error {
 		return fmt.Errorf("path not found: %w", err)
 	}
 
+	// Reject -- before any mutation -- renaming onto a NEW full path that
+	// already names an existing top-level node of ANY kind (table,
+	// array-table, or scalar key-value). The old duplicate check inside
+	// renameKeyInParent only scanned sibling *KeyValueNode*s, so renaming
+	// "name" to "server" when a top-level [server] table already existed
+	// slipped through and produced a document with two conflicting
+	// top-level "server" definitions and a nil error (BUG H-2). Only
+	// checked when every parent segment is a key segment -- an index
+	// segment anywhere in the path means the rename target lives inside
+	// an array element, which isn't represented by a flat top-level
+	// KeyPath and so can't collide with one.
+	if newPath, ok := renamedKeyPath(parentSegs, newKey); ok {
+		if kind, exists := keyPathExistsAsAnyKind(d, newPath); exists {
+			return fmt.Errorf("cannot rename %q to %q: %q already exists as a %s", path, newKey, newKey, kind)
+		}
+	}
+
 	return renameKeyInParent(parent, lastSeg.Key, newKey)
+}
+
+// renamedKeyPath builds the full top-level key path that a rename's NEW
+// name would occupy: parentSegs' keys followed by newKey. Returns ok=false
+// if parentSegs contains an index segment, since such a path cannot match
+// any *TableNode*/*ArrayTableNode*'s flat KeyPath (see keyPathExistsAsAnyKind).
+func renamedKeyPath(parentSegs []pathSegment, newKey string) ([]string, bool) {
+	path := make([]string, 0, len(parentSegs)+1)
+	for _, seg := range parentSegs {
+		if seg.Type != keySegment {
+			return nil, false
+		}
+		path = append(path, seg.Key)
+	}
+	path = append(path, newKey)
+	return path, true
 }
 
 // renameKeyInParent renames a key inside a parent container.
@@ -617,13 +731,16 @@ func (d *DocumentNode) NewTable(path string) error {
 		keyPath = append(keyPath, seg.Key)
 	}
 
-	// Check if a table with this path already exists.
-	for _, child := range d.Children {
-		if tbl, ok := child.(*TableNode); ok {
-			if pathsEqual(tbl.KeyPath, keyPath) {
-				return fmt.Errorf("table [%s] already exists", joinPath(keyPath))
-			}
-		}
+	// Reject -- before any mutation -- creating a table whose path already
+	// names an existing node of ANY kind (table, array-table, or a scalar
+	// key-value). The old check here only scanned for a same-kind
+	// *TableNode* collision, so creating [server] over an existing scalar
+	// `server = "..."` or an existing [[server]] array-table silently
+	// appended a second top-level "server" definition and returned nil --
+	// output the package's own parser then rejects as a redefinition
+	// (BUG H-2).
+	if kind, ok := keyPathExistsAsAnyKind(d, keyPath); ok {
+		return fmt.Errorf("cannot create table [%s]: already defined as a %s", joinPath(keyPath), kind)
 	}
 
 	tbl := &TableNode{
@@ -659,6 +776,18 @@ func (d *DocumentNode) NewArrayTable(path string) error {
 			return fmt.Errorf("NewArrayTable path must contain only key segments, not indices")
 		}
 		keyPath = append(keyPath, seg.Key)
+	}
+
+	// Reject -- before any mutation -- adding an array-table entry whose
+	// path already names an existing node of a DIFFERENT kind (a plain
+	// [table] or a scalar key-value). Appending another [[x]] entry when
+	// [[x]] already exists as an array-table is legal (that's how
+	// successive entries are added), so only a table/key-value collision
+	// is an error here; NewArrayTable previously performed NO existence
+	// check at all, silently producing a document with two conflicting
+	// top-level definitions and a nil error (BUG H-2).
+	if kind, ok := keyPathExistsAsAnyKind(d, keyPath); ok && kind != "array table" {
+		return fmt.Errorf("cannot create array table [[%s]]: already defined as a %s", joinPath(keyPath), kind)
 	}
 
 	atbl := &ArrayTableNode{
@@ -718,6 +847,19 @@ func valueToNodeVisited(v any, visited map[uintptr]bool) (Node, error) {
 
 	// Check if it already implements Node.
 	if n, ok := v.(Node); ok {
+		// A hand-built Node supplied directly by the caller (per Set/
+		// SetCreate's documented "any type implementing the Node
+		// interface" support) has a zero-value embedded nodeBase:
+		// dirty=false and raw=nil. serializeNode's "clean, use cached
+		// bytes" branches key off !isDirty(), so without marking it
+		// dirty here the node would be mistaken for an already-rendered
+		// parsed node and its empty Raw() would be emitted verbatim --
+		// producing invalid/empty TOML (BUG H-3, see
+		// audit_repro_test.go). Mark the whole subtree dirty so every
+		// descendant (array elements, inline-table entries) also
+		// re-renders from its semantic fields rather than its own
+		// (equally empty) cached Raw().
+		markSubtreeDirty(n)
 		return n, nil
 	}
 
@@ -821,6 +963,51 @@ func valueToNodeVisited(v any, visited map[uintptr]bool) (Node, error) {
 	}
 
 	return nil, fmt.Errorf("unsupported type: %T", v)
+}
+
+// markSubtreeDirty marks n, and (for container node types) every descendant
+// reachable from it, dirty. It exists to fix up a hand-built Node supplied
+// directly to Set/SetCreate: such a node -- and any nested Node it contains
+// -- carries a zero-value embedded nodeBase (dirty=false, raw=nil), which
+// serializeNode's "clean, use cached bytes" branches would otherwise
+// misinterpret as "already rendered, emit the (empty) cached Raw() verbatim"
+// (BUG H-3). Marking the whole subtree dirty forces every node to re-render
+// from its semantic fields regardless of any (already-false) dirty bit a
+// nested node happens to carry on its own.
+//
+// This mirrors isSubtreeDirty's container traversal (render.go) but performs
+// a write (markDirty) instead of a read, and additionally walks TableNode/
+// ArrayTableNode/KeyNode so a hand-built table or key passed as a value is
+// covered too, not just the scalar/array/inline-table cases isSubtreeDirty
+// needs for its narrower read-only check.
+func markSubtreeDirty(n Node) {
+	if n == nil {
+		return
+	}
+	n.markDirty()
+	switch node := n.(type) {
+	case *ArrayNode:
+		for _, elem := range node.Elements {
+			markSubtreeDirty(elem)
+		}
+	case *InlineTableNode:
+		for _, child := range node.Children {
+			markSubtreeDirty(child)
+		}
+	case *KeyValueNode:
+		if node.Key != nil {
+			markSubtreeDirty(node.Key)
+		}
+		markSubtreeDirty(node.Val)
+	case *TableNode:
+		for _, child := range node.Children {
+			markSubtreeDirty(child)
+		}
+	case *ArrayTableNode:
+		for _, child := range node.Children {
+			markSubtreeDirty(child)
+		}
+	}
 }
 
 // sliceIdentity returns the underlying data pointer of a slice value, used

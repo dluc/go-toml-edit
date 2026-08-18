@@ -13,7 +13,11 @@ import (
 // ==========================================================================
 
 // Two embedded structs with the same field name at the same depth.
-// Go convention: both are shadowed (neither accessible). Current code: first wins.
+// Go convention: both are shadowed (neither accessible) -- an ambiguous
+// selector is a compile error in real Go code, and the equivalent decode
+// behavior (mirroring encoding/json) is that neither promoted field is
+// populated. See BUG H-4 (audit_repro_test.go) for the shallower-always-wins
+// half of this rule; this test covers the same-depth-is-ambiguous half.
 func TestAudit_EmbeddedConflictingFields(t *testing.T) {
 	type A struct {
 		Name string `toml:"name"`
@@ -28,18 +32,13 @@ func TestAudit_EmbeddedConflictingFields(t *testing.T) {
 	input := `name = "hello"`
 	var cfg Config
 	err := Unmarshal([]byte(input), &cfg)
-	// Documenting current behavior: first embedded struct wins (A.Name gets set).
-	// This differs from encoding/json which makes conflicting fields invisible.
-	// Not necessarily a bug, but worth noting.
 	if err != nil {
-		t.Logf("INFO: conflicting embedded fields returned error: %v", err)
-		return
+		t.Fatalf("Unmarshal failed: %v", err)
 	}
-	// If no error, one of them should be set (current impl: first wins)
-	if cfg.A.Name == "" && cfg.B.Name == "" {
-		t.Error("neither embedded field was set -- both shadowed (Go convention, acceptable)")
+	// Both same-depth candidates are ambiguous, so neither is populated.
+	if cfg.A.Name != "" || cfg.B.Name != "" {
+		t.Errorf("expected both same-depth conflicting fields to stay unset (ambiguous), got A.Name=%q B.Name=%q", cfg.A.Name, cfg.B.Name)
 	}
-	t.Logf("INFO: A.Name=%q B.Name=%q (first-wins behavior)", cfg.A.Name, cfg.B.Name)
 }
 
 // Unexported embedded struct -- its exported fields should NOT be promoted.

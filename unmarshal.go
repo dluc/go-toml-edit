@@ -157,12 +157,29 @@ type fieldMapping struct {
 	fields map[string]structField
 }
 
+// fieldCandidate pairs a struct field with the embedding depth at which it
+// was found (0 == declared directly on the struct being decoded into; 1 ==
+// promoted from a directly embedded struct; etc). Depth is what lets us
+// apply Go's own field-promotion/shadowing rule after collection, instead of
+// the order fields happen to be visited in.
+type fieldCandidate struct {
+	sf    structField
+	depth int
+}
+
 func newFieldMapping(t reflect.Type) *fieldMapping {
 	fm := &fieldMapping{fields: make(map[string]structField)}
-	lowerFallback := make(map[string]structField)
-	collectFields(t, nil, fm.fields, lowerFallback)
+
+	exactCandidates := make(map[string][]fieldCandidate)
+	lowerCandidates := make(map[string][]fieldCandidate)
+	collectFields(t, nil, 0, exactCandidates, lowerCandidates)
+
+	resolveShallowest(exactCandidates, fm.fields)
+
 	// Add case-insensitive fallbacks that don't shadow exact matches.
-	for name, sf := range lowerFallback {
+	lowerResolved := make(map[string]structField)
+	resolveShallowest(lowerCandidates, lowerResolved)
+	for name, sf := range lowerResolved {
 		if _, exists := fm.fields[name]; !exists {
 			fm.fields[name] = sf
 		}
@@ -170,8 +187,11 @@ func newFieldMapping(t reflect.Type) *fieldMapping {
 	return fm
 }
 
-// collectFields recursively collects struct fields, handling embedded structs.
-func collectFields(t reflect.Type, indexPrefix []int, exact map[string]structField, lower map[string]structField) {
+// collectFields recursively collects struct field candidates, handling
+// embedded structs, and records each candidate's embedding depth. It does
+// NOT decide winners itself -- declaration/traversal order must not
+// determine precedence; only depth does. See resolveShallowest.
+func collectFields(t reflect.Type, indexPrefix []int, depth int, exact map[string][]fieldCandidate, lower map[string][]fieldCandidate) {
 	for i := 0; i < t.NumField(); i++ {
 		f := t.Field(i)
 		if !f.IsExported() {
@@ -192,8 +212,8 @@ func collectFields(t reflect.Type, indexPrefix []int, exact map[string]structFie
 				ft = ft.Elem()
 			}
 			if ft.Kind() == reflect.Struct {
-				// Promote embedded struct fields.
-				collectFields(ft, idx, exact, lower)
+				// Promote embedded struct fields at the next depth level.
+				collectFields(ft, idx, depth+1, exact, lower)
 				continue
 			}
 		}
@@ -204,14 +224,33 @@ func collectFields(t reflect.Type, indexPrefix []int, exact map[string]structFie
 		}
 
 		sf := structField{index: idx}
-		if _, exists := exact[name]; !exists {
-			exact[name] = sf
-		}
+		exact[name] = append(exact[name], fieldCandidate{sf: sf, depth: depth})
 		lo := strings.ToLower(name)
-		if _, exists := exact[lo]; !exists {
-			if _, exists2 := lower[lo]; !exists2 {
-				lower[lo] = sf
+		lower[lo] = append(lower[lo], fieldCandidate{sf: sf, depth: depth})
+	}
+}
+
+// resolveShallowest picks, for each name, the unique candidate at the
+// shallowest embedding depth -- mirroring Go's (and encoding/json's) field
+// promotion rule: a field at a shallower depth always shadows a same-named
+// field at a deeper depth. If two or more candidates tie for the shallowest
+// depth, the name is ambiguous and is dropped entirely (no candidate wins),
+// again mirroring encoding/json's handling of colliding promoted fields.
+func resolveShallowest(candidates map[string][]fieldCandidate, out map[string]structField) {
+	for name, cands := range candidates {
+		best := cands[0]
+		ambiguous := false
+		for _, c := range cands[1:] {
+			switch {
+			case c.depth < best.depth:
+				best = c
+				ambiguous = false
+			case c.depth == best.depth:
+				ambiguous = true
 			}
+		}
+		if !ambiguous {
+			out[name] = best.sf
 		}
 	}
 }
