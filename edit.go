@@ -695,7 +695,23 @@ func (d *DocumentNode) NewArrayTable(path string) error {
 
 // valueToNode converts a Go value to the appropriate AST node.
 // All created nodes are dirty (no raw bytes).
+//
+// This is the public (package-internal) entry point: each call starts a
+// fresh cycle-detection descent. Recursive calls made while already inside a
+// descent (from sliceToArrayNode / mapToInlineTableNode / the marshal path)
+// call valueToNodeVisited directly instead, threading the same visited set
+// so a true cycle -- a map or slice that references itself, directly or
+// through intermediate containers -- is detected instead of recursing until
+// the stack overflows.
 func valueToNode(v any) (Node, error) {
+	return valueToNodeVisited(v, make(map[uintptr]bool))
+}
+
+// valueToNodeVisited is valueToNode's recursive worker. visited holds the
+// identities (map data pointer / slice data pointer) of containers
+// currently on the descent path; it is threaded through and shared with
+// sliceToArrayNode and mapToInlineTableNode.
+func valueToNodeVisited(v any, visited map[uintptr]bool) (Node, error) {
 	if v == nil {
 		return nil, fmt.Errorf("unsupported type: nil")
 	}
@@ -788,10 +804,10 @@ func valueToNode(v any) (Node, error) {
 		return n, nil
 
 	case []any:
-		return sliceToArrayNode(val)
+		return sliceToArrayNode(val, visited)
 
 	case map[string]any:
-		return mapToInlineTableNode(val)
+		return mapToInlineTableNode(val, visited)
 	}
 
 	// Use reflection for typed slices (e.g., []string, []int).
@@ -801,18 +817,42 @@ func valueToNode(v any) (Node, error) {
 		for i := 0; i < rv.Len(); i++ {
 			items[i] = rv.Index(i).Interface()
 		}
-		return sliceToArrayNode(items)
+		return sliceToArrayNode(items, visited)
 	}
 
 	return nil, fmt.Errorf("unsupported type: %T", v)
 }
 
-// sliceToArrayNode converts a []any to an ArrayNode with recursive conversion.
-func sliceToArrayNode(items []any) (Node, error) {
+// sliceIdentity returns the underlying data pointer of a slice value, used
+// (like mapIdentity) to detect cycles during marshal/valueToNode recursion.
+// ok is false for a nil or empty slice (Pointer() == 0), which can never
+// participate in a cycle since it has no elements to recurse into.
+func sliceIdentity(items []any) (uintptr, bool) {
+	ptr := reflect.ValueOf(items).Pointer()
+	if ptr == 0 {
+		return 0, false
+	}
+	return ptr, true
+}
+
+// sliceToArrayNode converts a []any to an ArrayNode with recursive
+// conversion. visited tracks container identities on the current descent
+// path (see valueToNodeVisited) so a self-referential slice errors instead
+// of recursing forever; a slice referenced from two non-overlapping
+// branches (not a cycle) still marshals fine.
+func sliceToArrayNode(items []any, visited map[uintptr]bool) (Node, error) {
+	if ptr, tracked := sliceIdentity(items); tracked {
+		if visited[ptr] {
+			return nil, errCyclicMarshal
+		}
+		visited[ptr] = true
+		defer delete(visited, ptr)
+	}
+
 	arr := &ArrayNode{}
 	arr.markDirty()
 	for _, item := range items {
-		elem, err := valueToNode(item)
+		elem, err := valueToNodeVisited(item, visited)
 		if err != nil {
 			return nil, fmt.Errorf("array element: %w", err)
 		}
@@ -822,8 +862,20 @@ func sliceToArrayNode(items []any) (Node, error) {
 }
 
 // mapToInlineTableNode converts a map[string]any to an InlineTableNode.
-// Keys are sorted alphabetically for deterministic output.
-func mapToInlineTableNode(m map[string]any) (Node, error) {
+// Keys are sorted alphabetically for deterministic output. visited tracks
+// container identities on the current descent path (see valueToNodeVisited)
+// so a self-referential map errors instead of recursing forever; a map
+// referenced from two non-overlapping branches (not a cycle) still
+// marshals fine.
+func mapToInlineTableNode(m map[string]any, visited map[uintptr]bool) (Node, error) {
+	if ptr, tracked := mapIdentity(reflect.ValueOf(m)); tracked {
+		if visited[ptr] {
+			return nil, errCyclicMarshal
+		}
+		visited[ptr] = true
+		defer delete(visited, ptr)
+	}
+
 	tbl := &InlineTableNode{}
 	tbl.markDirty()
 	keys := make([]string, 0, len(m))
@@ -832,7 +884,7 @@ func mapToInlineTableNode(m map[string]any) (Node, error) {
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		valNode, err := valueToNode(m[k])
+		valNode, err := valueToNodeVisited(m[k], visited)
 		if err != nil {
 			return nil, fmt.Errorf("inline table key %q: %w", k, err)
 		}

@@ -240,13 +240,18 @@ func mergeSubTable(target *DocumentNode, source *DocumentNode, tbl *TableNode, s
 	return nil
 }
 
-// mergeArrayTableEntry creates a new [[array-table]] entry in the target.
-func mergeArrayTableEntry(target *DocumentNode, _ *DocumentNode, atn *ArrayTableNode, subPrefix string) error {
+// mergeArrayTableEntry creates a new [[array-table]] entry in the target and
+// merges the entry's own KV children, plus any sub-tables that are scoped to
+// this specific entry by DOCUMENT POSITION (e.g. a [fruits.physical] table
+// immediately following this [[fruits]] entry belongs to it, not to the
+// document root -- see mergeOwnedArrayTableChildren).
+func mergeArrayTableEntry(target *DocumentNode, source *DocumentNode, atn *ArrayTableNode, subPrefix string) error {
 	if err := target.NewArrayTable(subPrefix); err != nil {
 		return fmt.Errorf("creating array table %q: %w", subPrefix, err)
 	}
 	// Find the last entry index (the one we just created is at index 0 if new).
 	// Use SetCreate to add children.
+	entryPrefix := subPrefix + "[-1]"
 	for _, child := range atn.Children {
 		kv, ok := child.(*KeyValueNode)
 		if !ok {
@@ -255,9 +260,65 @@ func mergeArrayTableEntry(target *DocumentNode, _ *DocumentNode, atn *ArrayTable
 		// For array-of-tables, we need to target the last entry.
 		// Since we just created it with NewArrayTable, the path with [-1]
 		// should work.
-		fullPath := subPrefix + "[-1]." + buildPathFromParts("", kv.Key.Parts)
+		fullPath := entryPrefix + "." + buildPathFromParts("", kv.Key.Parts)
 		if err := target.SetCreate(fullPath, nodeToValue(kv.Val)); err != nil {
 			return fmt.Errorf("merging array table entry key %q: %w", fullPath, err)
+		}
+		copyComments(target, fullPath, kv)
+	}
+
+	return mergeOwnedArrayTableChildren(target, source, atn, entryPrefix)
+}
+
+// mergeOwnedArrayTableChildren finds every TableNode in source that is
+// positionally scoped to atn -- i.e. it appears after atn in source.Children
+// and before the next entry with the same key path, per TOML's "nearest
+// preceding array-table entry owns it" rule -- and merges each one's own KV
+// children into target under entryPrefix (e.g. "fruits[-1]").
+//
+// This reuses scopedDescendantIndices (document.go), the same
+// position-based ownership helper already relied on by NewArrayTable and
+// the array-table delete path, rather than a naive key-path prefix check
+// (which cannot distinguish "owned by this entry" from "owned by the
+// document root" or "owned by a sibling entry of the same array").
+//
+// Nested array-of-tables owned by atn (e.g. [[fruits.varieties]] under a
+// [[fruits]] entry) are intentionally not handled here -- no current
+// caller produces that shape, and scopedDescendantIndices' single-prefix
+// scan cannot by itself distinguish a nested array-table's own owned
+// descendants from atn's, so extending this would require the same kind of
+// recursive, per-entry ownership resolution this fix introduces for atn
+// itself. Left as a follow-up rather than expanding this fix's scope.
+func mergeOwnedArrayTableChildren(target *DocumentNode, source *DocumentNode, atn *ArrayTableNode, entryPrefix string) error {
+	entryIdx := -1
+	for i, child := range source.Children {
+		if child == atn {
+			entryIdx = i
+			break
+		}
+	}
+	if entryIdx == -1 {
+		return nil
+	}
+
+	for _, idx := range scopedDescendantIndices(source, entryIdx, atn.KeyPath, atn.KeyPath) {
+		tbl, ok := source.Children[idx].(*TableNode)
+		if !ok {
+			// Nested ArrayTableNode: see doc comment above.
+			continue
+		}
+		suffix := tbl.KeyPath[len(atn.KeyPath):]
+		subPath := buildPathFromParts(entryPrefix, suffix)
+		for _, child := range tbl.Children {
+			kv, ok := child.(*KeyValueNode)
+			if !ok {
+				continue
+			}
+			fullPath := buildPathFromParts(subPath, kv.Key.Parts)
+			if err := target.SetCreate(fullPath, nodeToValue(kv.Val)); err != nil {
+				return fmt.Errorf("merging array table sub-table key %q: %w", fullPath, err)
+			}
+			copyComments(target, fullPath, kv)
 		}
 	}
 	return nil
@@ -293,14 +354,19 @@ func scopeKeyPath(scope Node) []string {
 	}
 }
 
-// isDirectChild returns true if childPath is a direct child of parentPath.
-// For example, ["a","b"] is a direct child of ["a"] but not of [].
-// For the root scope (parentPath is nil), any single-element path is direct.
+// isDirectChild returns true if childPath is a direct (exactly one level
+// deeper) child of parentPath. For example, ["a","b"] is a direct child of
+// ["a"] but not of []. For the root scope (parentPath is nil), only a
+// single-element path (e.g. ["a"]) is direct -- a deeper path like
+// ["a","b"] is NOT a direct child of root, even though hasPrefix(nil, ...)
+// is trivially true for every path. Deeper/scoped paths are owned by
+// whichever table or array-table entry they are actually nested under
+// (see mergeOwnedArrayTableChildren), not by the root.
 func isDirectChild(childPath, parentPath []string) bool {
 	if !hasPrefix(childPath, parentPath) {
 		return false
 	}
-	return len(childPath) > len(parentPath)
+	return len(childPath) == len(parentPath)+1
 }
 
 // isTableLike returns true if the node represents a table-like structure

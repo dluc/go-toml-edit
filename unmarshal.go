@@ -313,9 +313,16 @@ func (dec *decoder) decodeKVIntoMap(kv *KeyValueNode, rv reflect.Value, pathPref
 		currentPath := appendPath(pathPrefix, part)
 		keyVal := reflect.ValueOf(part)
 		if i < len(parts)-1 {
-			current = ensureSubMap(current, keyVal)
+			var err error
+			current, err = ensureSubMap(current, keyVal)
+			if err != nil {
+				return fmt.Errorf("toml: %q: %w", currentPath, err)
+			}
 		} else {
-			elemType := rv.Type().Elem()
+			// Use current's (not the outer rv's) element type: current may
+			// be a nested sub-map reached via ensureSubMap, whose element
+			// type can differ from the outer map's.
+			elemType := current.Type().Elem()
 			val := reflect.New(elemType).Elem()
 			if err := dec.decodeValue(kv.Val, val, currentPath); err != nil {
 				return err
@@ -328,20 +335,33 @@ func (dec *decoder) decodeKVIntoMap(kv *KeyValueNode, rv reflect.Value, pathPref
 
 // decodeDottedKVIntoMap handles the tail of a dotted key when entering a map.
 func (dec *decoder) decodeDottedKVIntoMap(kv *KeyValueNode, remaining []string, rv reflect.Value, pathPrefix string) error {
+	if rv.Type().Key().Kind() != reflect.String {
+		return fmt.Errorf("toml: cannot decode into map with non-string key type %s", rv.Type().Key())
+	}
 	if rv.IsNil() {
 		rv.Set(reflect.MakeMap(rv.Type()))
 	}
 	current := rv
 	for i, part := range remaining {
+		currentPath := appendPath(pathPrefix, part)
 		keyVal := reflect.ValueOf(part)
 		if i < len(remaining)-1 {
-			current = ensureSubMap(current, keyVal)
-		} else {
-			val, err := dec.decodeToInterface(kv.Val)
+			var err error
+			current, err = ensureSubMap(current, keyVal)
 			if err != nil {
+				return fmt.Errorf("toml: %q: %w", currentPath, err)
+			}
+		} else {
+			// Decode into a properly-typed value (mirroring
+			// decodeKVIntoMap) instead of blindly assigning a decoded
+			// interface{} -- a mismatched value type must produce a clean
+			// error, not a reflect panic.
+			elemType := current.Type().Elem()
+			val := reflect.New(elemType).Elem()
+			if err := dec.decodeValue(kv.Val, val, currentPath); err != nil {
 				return err
 			}
-			current.SetMapIndex(keyVal, reflect.ValueOf(val))
+			current.SetMapIndex(keyVal, val)
 		}
 	}
 	return nil
@@ -412,7 +432,11 @@ func (dec *decoder) decodeTableNodeIntoMap(doc *DocumentNode, tbl *TableNode, rv
 	}
 	current := rv
 	for _, part := range tbl.KeyPath {
-		current = ensureSubMap(current, reflect.ValueOf(part))
+		var err error
+		current, err = ensureSubMap(current, reflect.ValueOf(part))
+		if err != nil {
+			return fmt.Errorf("toml: %q: %w", strings.Join(tbl.KeyPath, "."), err)
+		}
 	}
 	pathPrefix := strings.Join(tbl.KeyPath, ".")
 	for _, child := range tbl.Children {
@@ -658,8 +682,15 @@ func (dec *decoder) decodeArrayTableNodeIntoMap(doc *DocumentNode, atbl *ArrayTa
 	for i, part := range atbl.KeyPath {
 		keyVal := reflect.ValueOf(part)
 		if i < len(atbl.KeyPath)-1 {
-			current = ensureSubMap(current, keyVal)
+			var err error
+			current, err = ensureSubMap(current, keyVal)
+			if err != nil {
+				return fmt.Errorf("toml: %q: %w", strings.Join(atbl.KeyPath, "."), err)
+			}
 		} else {
+			if current.Type().Key().Kind() != reflect.String {
+				return fmt.Errorf("toml: cannot decode into map with non-string key type %s", current.Type().Key())
+			}
 			pathKey := strings.Join(atbl.KeyPath, ".")
 			entryMap := make(map[string]any)
 			for _, child := range atbl.Children {
@@ -674,7 +705,11 @@ func (dec *decoder) decodeArrayTableNodeIntoMap(doc *DocumentNode, atbl *ArrayTa
 			dec.decodeArrayTableSubTablesIntoMap(doc, atbl, entryMap)
 
 			slices[pathKey] = append(slices[pathKey], entryMap)
-			current.SetMapIndex(keyVal, reflect.ValueOf(slices[pathKey]))
+			sliceVal := reflect.ValueOf(slices[pathKey])
+			if !sliceVal.Type().AssignableTo(current.Type().Elem()) {
+				return fmt.Errorf("toml: cannot decode array table %q into map with element type %s", pathKey, current.Type().Elem())
+			}
+			current.SetMapIndex(keyVal, sliceVal)
 		}
 	}
 	return nil
@@ -1089,8 +1124,16 @@ func appendPath(prefix, part string) string {
 	return prefix + "." + part
 }
 
-// ensureSubMap ensures a sub-map exists at the given key in the map and returns it.
-func ensureSubMap(m reflect.Value, key reflect.Value) reflect.Value {
+// ensureSubMap ensures a sub-map exists at the given key in the map and
+// returns it. It never panics: any input/target-type combination that
+// cannot be satisfied (non-string map key, an existing non-map value at
+// key, or a map whose element type cannot itself hold a nested map)
+// returns a descriptive error instead.
+func ensureSubMap(m reflect.Value, key reflect.Value) (reflect.Value, error) {
+	if m.Type().Key().Kind() != reflect.String {
+		return reflect.Value{}, fmt.Errorf("cannot decode into map with non-string key type %s", m.Type().Key())
+	}
+
 	existing := m.MapIndex(key)
 	if existing.IsValid() {
 		elem := existing
@@ -1098,16 +1141,37 @@ func ensureSubMap(m reflect.Value, key reflect.Value) reflect.Value {
 			elem = elem.Elem()
 		}
 		if elem.Kind() == reflect.Map {
-			return elem
+			return elem, nil
 		}
+		return reflect.Value{}, fmt.Errorf("cannot decode nested key: existing value is %s, not a map", existing.Type())
 	}
-	sub := reflect.MakeMap(m.Type())
+
+	// Build the sub-map using the OUTER map's element type, not the outer
+	// map's own type -- the sub-map we create is the VALUE stored at key,
+	// so it must match what m can actually hold. When the element type is
+	// itself a map (e.g. m is map[string]map[string]int), build that exact
+	// type. When the element type is an interface (e.g. m is
+	// map[string]any), build a concrete map[string]any to store in it.
+	// Anything else (e.g. m is map[string]int) cannot hold a nested map at
+	// all -- that is a genuine type mismatch, reported as an error.
+	elemType := m.Type().Elem()
+	var subType reflect.Type
+	switch elemType.Kind() {
+	case reflect.Map:
+		subType = elemType
+	case reflect.Interface:
+		subType = reflect.TypeOf(map[string]any{})
+	default:
+		return reflect.Value{}, fmt.Errorf("cannot decode nested key into map with element type %s", elemType)
+	}
+
+	sub := reflect.MakeMap(subType)
 	m.SetMapIndex(key, sub)
 	got := m.MapIndex(key)
 	if got.Kind() == reflect.Interface {
 		got = got.Elem()
 	}
-	return got
+	return got, nil
 }
 
 // setNestedMapValue sets a value in a nested map[string]any following a dotted key path.

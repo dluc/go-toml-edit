@@ -26,7 +26,13 @@ func Marshal(v any) ([]byte, error) {
 		return nil, fmt.Errorf("toml: Marshal requires a map type, got %s", rv.Type())
 	}
 
-	doc, err := mapToDocument(rv)
+	visited := make(map[uintptr]bool)
+	if ptr, ok := mapIdentity(rv); ok {
+		visited[ptr] = true
+		defer delete(visited, ptr)
+	}
+
+	doc, err := mapToDocument(rv, visited)
 	if err != nil {
 		return nil, err
 	}
@@ -39,8 +45,36 @@ func Marshal(v any) ([]byte, error) {
 	return b, nil
 }
 
+// errCyclicMarshal is returned whenever the marshal recursion encounters a
+// map (or other reference value) that is already on the current descent
+// path -- i.e. a genuine cycle, not merely a DAG-style shared reference.
+var errCyclicMarshal = fmt.Errorf("toml: Marshal encountered a cyclic map/reference")
+
+// mapIdentity returns the underlying data pointer of a map value (unwrapping
+// interfaces first), used to detect cycles during marshal recursion. ok is
+// false if v does not unwrap to a map, or the map is nil (nil maps have no
+// entries to recurse into, so they can never participate in a cycle).
+func mapIdentity(v reflect.Value) (uintptr, bool) {
+	for v.Kind() == reflect.Interface {
+		v = v.Elem()
+	}
+	if v.Kind() != reflect.Map {
+		return 0, false
+	}
+	ptr := v.Pointer()
+	if ptr == 0 {
+		return 0, false
+	}
+	return ptr, true
+}
+
 // mapToDocument builds a DocumentNode from a reflect.Value of map kind.
-func mapToDocument(rv reflect.Value) (*DocumentNode, error) {
+// visited tracks the identities of maps currently on the recursion stack
+// (the descent path from the root), so that a true cycle is detected and
+// reported as an error instead of recursing forever. Entries are removed
+// from visited as the recursion unwinds, so a map referenced from two
+// non-overlapping branches (a DAG, not a cycle) still marshals fine.
+func mapToDocument(rv reflect.Value, visited map[uintptr]bool) (*DocumentNode, error) {
 	doc := &DocumentNode{}
 	doc.markDirty()
 
@@ -61,7 +95,7 @@ func mapToDocument(rv reflect.Value) (*DocumentNode, error) {
 	// Emit simple key-value pairs.
 	for _, k := range simpleKeys {
 		val := rv.MapIndex(reflect.ValueOf(k)).Interface()
-		kv, err := makeKeyValue(k, val)
+		kv, err := makeKeyValue(k, val, visited)
 		if err != nil {
 			return nil, fmt.Errorf("toml: key %q: %w", k, err)
 		}
@@ -75,7 +109,18 @@ func mapToDocument(rv reflect.Value) (*DocumentNode, error) {
 		for val.Kind() == reflect.Interface {
 			val = val.Elem()
 		}
-		children, err := mapChildrenToNodes(val)
+
+		ptr, tracked := mapIdentity(val)
+		if tracked {
+			if visited[ptr] {
+				return nil, fmt.Errorf("toml: section %q: %w", k, errCyclicMarshal)
+			}
+			visited[ptr] = true
+		}
+		children, err := mapChildrenToNodes(val, visited)
+		if tracked {
+			delete(visited, ptr)
+		}
 		if err != nil {
 			return nil, fmt.Errorf("toml: section %q: %w", k, err)
 		}
@@ -94,12 +139,12 @@ func mapToDocument(rv reflect.Value) (*DocumentNode, error) {
 // mapChildrenToNodes converts the entries of a map into KeyValueNode children.
 // Nested maps at this level become inline tables (via valueToNode) since we
 // only produce one level of [section] headers.
-func mapChildrenToNodes(rv reflect.Value) ([]Node, error) {
+func mapChildrenToNodes(rv reflect.Value, visited map[uintptr]bool) ([]Node, error) {
 	keys := sortedMapKeys(rv)
 	var nodes []Node
 	for _, k := range keys {
 		val := rv.MapIndex(reflect.ValueOf(k)).Interface()
-		kv, err := makeKeyValue(k, val)
+		kv, err := makeKeyValue(k, val, visited)
 		if err != nil {
 			return nil, fmt.Errorf("key %q: %w", k, err)
 		}
@@ -109,8 +154,8 @@ func mapChildrenToNodes(rv reflect.Value) ([]Node, error) {
 }
 
 // makeKeyValue creates a KeyValueNode for a single key and Go value.
-func makeKeyValue(key string, val any) (*KeyValueNode, error) {
-	valNode, err := valueToNode(val)
+func makeKeyValue(key string, val any, visited map[uintptr]bool) (*KeyValueNode, error) {
+	valNode, err := valueToNodeVisited(val, visited)
 	if err != nil {
 		return nil, err
 	}

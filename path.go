@@ -30,7 +30,10 @@ type pathSegment struct {
 //   - Quoted segment: "host.name" -> key "host.name" (quotes are part of the path syntax, not the key)
 //   - Adjacent brackets: "[0][1]" for nested arrays
 //
-// Empty path returns an error.
+// Empty path returns an error. A leading dot, a trailing dot, or two
+// consecutive dots all denote an empty key segment, which is also an error:
+// every dot must have a real segment (bare key, quoted key, or index) on
+// both sides of it.
 func parsePath(path string) ([]pathSegment, error) {
 	if path == "" {
 		return nil, fmt.Errorf("empty path")
@@ -38,14 +41,25 @@ func parsePath(path string) ([]pathSegment, error) {
 
 	var segments []pathSegment
 	i := 0
+	// expectSegment is true at the very start of the path and immediately
+	// after consuming a '.' separator: a '.' encountered while it is still
+	// true means an empty segment (leading dot, trailing dot once we fall
+	// off the end, or two consecutive dots) -- report it as an error
+	// instead of falling through to a parse step that could fail to
+	// consume any input and stall the loop forever.
+	expectSegment := true
 
 	for i < len(path) {
-		// Skip leading dot (separator between segments), but not at start
-		if i > 0 && path[i] == '.' {
+		if path[i] == '.' {
+			if expectSegment {
+				return nil, fmt.Errorf("empty key segment in path %q at position %d", path, i)
+			}
 			i++
 			if i >= len(path) {
 				return nil, fmt.Errorf("trailing dot in path")
 			}
+			expectSegment = true
+			continue
 		}
 
 		if path[i] == '[' {
@@ -56,7 +70,11 @@ func parsePath(path string) ([]pathSegment, error) {
 			}
 			segments = append(segments, seg)
 			i = newI
-		} else if path[i] == '"' {
+			expectSegment = false
+			continue
+		}
+
+		if path[i] == '"' {
 			// Quoted key segment
 			seg, newI, err := parseQuotedKey(path, i)
 			if err != nil {
@@ -64,12 +82,22 @@ func parsePath(path string) ([]pathSegment, error) {
 			}
 			segments = append(segments, seg)
 			i = newI
-		} else {
-			// Bare key segment (may contain escaped dots)
-			seg, newI := parseBareKey(path, i)
-			segments = append(segments, seg)
-			i = newI
+			expectSegment = false
+			continue
 		}
+
+		// Bare key segment (may contain escaped dots). By construction
+		// path[i] here is never '.', '[', or '"' (all handled above), so
+		// parseBareKey is guaranteed to consume at least one byte -- but
+		// guard against zero progress explicitly anyway so this loop can
+		// never stall regardless of future changes to parseBareKey.
+		seg, newI := parseBareKey(path, i)
+		if newI == i {
+			return nil, fmt.Errorf("empty key segment in path %q at position %d", path, i)
+		}
+		segments = append(segments, seg)
+		i = newI
+		expectSegment = false
 	}
 
 	return segments, nil
