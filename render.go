@@ -267,22 +267,63 @@ func renderMultiLineBasicString(s string) []byte {
 	return []byte(b.String())
 }
 
+// negMagnitude returns the absolute value of a negative int64 as a uint64,
+// without overflowing for math.MinInt64 (whose magnitude, 2^63, has no
+// representation as a positive int64). A plain `-v` on math.MinInt64 wraps
+// back around to math.MinInt64 in two's-complement, which is still negative;
+// computing via `-(v+1)+1` in unsigned arithmetic avoids that overflow.
+func negMagnitude(v int64) uint64 {
+	// v is known negative here. v+1 cannot overflow (v >= MinInt64, so
+	// v+1 >= MinInt64+1, which is representable). -(v+1) is then a
+	// non-negative int64 safe to convert to uint64, and adding 1 back
+	// (in uint64 space) yields the true magnitude, including for
+	// v == math.MinInt64.
+	return uint64(-(v + 1)) + 1
+}
+
 // renderInteger renders an IntegerNode based on its Base.
+//
+// Note on math.MinInt64 in non-decimal bases: TOML's hex/octal/binary integer
+// literals are unsigned by spec -- a leading sign is never valid there (this
+// package's own lexer rejects it, matching the toml-test
+// invalid/integer/negative-hex|oct|bin compliance fixtures), independent of
+// what digits follow it. So even a *correctly* magnitude-computed
+// "-0x8000000000000000" is not a literal this package's parser will ever
+// accept back -- there is no round-trippable sign-prefixed representation of
+// math.MinInt64 (or of any negative value) in these bases. For every other
+// negative value that has been an existing, documented limitation (see
+// TestAuditIntegerNegativeHex); math.MinInt64 gets a decimal fallback instead
+// of a plain sign+magnitude literal because unlike other negative values, its
+// magnitude (2^63) doesn't even fit in a positive int64, so the naive
+// `-n.Val` used previously silently wrapped back around to a negative number
+// and produced a doubly-negative, garbled literal (e.g. "-0x-8000...").
+// Decimal already renders math.MinInt64 correctly (strconv.FormatInt handles
+// it natively) and is always valid TOML, so it's used as the safe fallback
+// for this one unrepresentable edge case.
 func renderInteger(n *IntegerNode) []byte {
 	switch n.Base {
 	case IntegerHex:
 		if n.Val < 0 {
-			return []byte("-0x" + strconv.FormatInt(-n.Val, 16))
+			if n.Val == math.MinInt64 {
+				return []byte(strconv.FormatInt(n.Val, 10))
+			}
+			return []byte("-0x" + strconv.FormatUint(negMagnitude(n.Val), 16))
 		}
 		return []byte("0x" + strconv.FormatInt(n.Val, 16))
 	case IntegerOctal:
 		if n.Val < 0 {
-			return []byte("-0o" + strconv.FormatInt(-n.Val, 8))
+			if n.Val == math.MinInt64 {
+				return []byte(strconv.FormatInt(n.Val, 10))
+			}
+			return []byte("-0o" + strconv.FormatUint(negMagnitude(n.Val), 8))
 		}
 		return []byte("0o" + strconv.FormatInt(n.Val, 8))
 	case IntegerBinary:
 		if n.Val < 0 {
-			return []byte("-0b" + strconv.FormatInt(-n.Val, 2))
+			if n.Val == math.MinInt64 {
+				return []byte(strconv.FormatInt(n.Val, 10))
+			}
+			return []byte("-0b" + strconv.FormatUint(negMagnitude(n.Val), 2))
 		}
 		return []byte("0b" + strconv.FormatInt(n.Val, 2))
 	default: // IntegerDecimal

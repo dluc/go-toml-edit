@@ -25,6 +25,13 @@ const (
 // DocumentNode is the root node of a TOML document.
 type DocumentNode struct {
 	nodeBase
+
+	// Children holds the document's live top-level nodes (key-value pairs,
+	// tables, array-tables, comments). This is the same slice Get/Resolve
+	// traverse, not a copy. Reordering, inserting into, or removing from
+	// this slice directly is not a supported mutation surface and is not
+	// guaranteed to be reflected by Bytes(); use Set, Delete, NewTable, and
+	// NewArrayTable to modify the document structure.
 	Children []Node
 
 	// leadingBOM holds a UTF-8 byte order mark (0xEF 0xBB 0xBF) found at the
@@ -46,7 +53,13 @@ func (n *DocumentNode) Value() any     { return n.Children }
 // from KeyPath in that case, so the node does not vanish from the output.
 type TableNode struct {
 	nodeBase
-	KeyPath  []string
+	KeyPath []string
+
+	// Children holds the table's live child nodes (the same slice Get
+	// returns and traverses, not a copy). Reordering, inserting into, or
+	// removing from this slice directly is not a supported mutation
+	// surface and is not guaranteed to be reflected by Bytes(); use Set
+	// and Delete to modify the table's contents.
 	Children []Node
 }
 
@@ -63,7 +76,13 @@ func (n *TableNode) Value() any     { return n.Children }
 // node does not vanish from the output.
 type ArrayTableNode struct {
 	nodeBase
-	KeyPath  []string
+	KeyPath []string
+
+	// Children holds the array-table entry's live child nodes (the same
+	// slice Get returns and traverses, not a copy). Reordering, inserting
+	// into, or removing from this slice directly is not a supported
+	// mutation surface and is not guaranteed to be reflected by Bytes();
+	// use Set and Delete to modify the entry's contents.
 	Children []Node
 }
 
@@ -168,7 +187,17 @@ func (n *LocalTimeNode) Value() any     { return n.Val }
 // ArrayNode represents an array value.
 type ArrayNode struct {
 	nodeBase
-	Elements         []Node
+
+	// Elements holds the array's live element nodes. This is the same
+	// slice Get returns, not a copy. Reassigning, slicing, appending to,
+	// or otherwise mutating this slice directly is NOT reflected by
+	// Bytes() -- doing so does not mark the node dirty, so a clean
+	// parsed array re-renders from its original raw bytes and the
+	// mutation is silently dropped. Use Set (to replace an index or the
+	// whole array) and Delete (to remove an index, e.g. "arr[0]") to
+	// modify array contents; those APIs mark the node dirty for you.
+	Elements []Node
+
 	TrailingComments [][]byte // comments after the last element, before ']'
 }
 
@@ -178,6 +207,14 @@ func (n *ArrayNode) Value() any     { return n.Elements }
 // InlineTableNode represents an inline table value.
 type InlineTableNode struct {
 	nodeBase
+
+	// Children holds the inline table's live KeyValueNode entries. This is
+	// the same slice Get returns, not a copy. Reordering, inserting into,
+	// or removing from this slice directly is NOT reflected by Bytes() --
+	// doing so does not mark the node dirty, so a clean parsed inline
+	// table re-renders from its original raw bytes and the mutation is
+	// silently dropped. Use Set and Delete to modify entries; those APIs
+	// mark the node dirty for you.
 	Children []Node // KeyValueNode entries
 }
 

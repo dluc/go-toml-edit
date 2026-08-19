@@ -508,51 +508,120 @@ func TestAuditBug_M2_SetErrorsOnExistingDottedKey(t *testing.T) {
 }
 
 // =====================================================================
-// M-3 (Medium, DESIGN-DEPENDENT) -- Get returns a live container node;
-// external mutation of it is silently dropped by Bytes().
-// render.go: serializeNode's default leaf case (~line 79-82) and the
-// ArrayNode branch of isSubtreeDirty (~line 89-108) only ever consult
-// isDirty() flags set via markDirty(); direct field mutation on a node
-// returned by Get() (e.g. `a.Elements = a.Elements[1:]`) never calls
-// markDirty(), so Bytes() takes the "not dirty" fast path and re-emits the
-// ORIGINAL Raw() bytes, silently discarding the caller's mutation.
+// M-3 (Medium, DESIGN-DEPENDENT -- RESOLVED as documented contract) --
+// Get returns a live container node; external mutation of it is silently
+// dropped by Bytes().
+// render.go: serializeNode's default leaf case and the ArrayNode branch of
+// isSubtreeDirty only ever consult isDirty() flags set via markDirty();
+// direct field mutation on a node returned by Get() (e.g.
+// `a.Elements = a.Elements[1:]`) never calls markDirty(), so Bytes() takes
+// the "not dirty" fast path and re-emits the ORIGINAL Raw() bytes, silently
+// discarding the caller's mutation.
 //
-// This finding is DESIGN-DEPENDENT: the eventual fix may be to make
-// Get()'s returned containers dirty-tracking-aware (this test then stays
-// as written), OR the project may decide the documented contract is
-// "Get() returns a read-only view; mutate via Set/Delete instead" (in
-// which case this test should be inverted/removed and the contract
-// documented instead of changed). Do not "fix" this by picking a
-// direction without that decision being made explicitly.
+// RESOLUTION: Get() intentionally returns the document's live internal
+// node (for reading and structured navigation); making it return a copy
+// would defeat in-place editing via the Set/Delete API family. The
+// resolution is therefore to DOCUMENT the contract rather than change
+// Get()'s behavior: exported container fields (ArrayNode.Elements,
+// InlineTableNode.Children, TableNode.Children, ArrayTableNode.Children,
+// DocumentNode.Children) are not a supported direct-mutation surface --
+// see their doc comments in node_types.go and Get's doc comment in
+// document.go. Callers must use Set/Delete (which correctly call
+// markDirty()) to change array/table contents. The test below asserts
+// both halves of that documented contract instead of the old, now-invalid
+// expectation that direct field mutation is reflected.
 // =====================================================================
 
-func TestAuditBug_M3_GetReturnsLiveContainerMutationDropped(t *testing.T) {
-	doc := mustParse(t, "arr = [1, 2, 3]\n")
+func TestAuditBug_M3_GetReturnsLiveContainer_MutateViaAPI(t *testing.T) {
+	// (a) Direct mutation of the exported field on the live node returned
+	// by Get() is NOT a supported mutation surface and is NOT reflected by
+	// Bytes(): the array is unchanged (still 3 elements) because the
+	// slice reassignment never calls markDirty().
+	t.Run("direct field mutation is not reflected", func(t *testing.T) {
+		doc := mustParse(t, "arr = [1, 2, 3]\n")
 
-	node := doc.Get("arr")
-	arr, ok := node.(*ArrayNode)
-	if !ok {
-		t.Fatalf("Get(\"arr\") returned %T, want *ArrayNode", node)
-	}
-	arr.Elements = arr.Elements[1:]
+		node := doc.Get("arr")
+		arr, ok := node.(*ArrayNode)
+		if !ok {
+			t.Fatalf("Get(\"arr\") returned %T, want *ArrayNode", node)
+		}
+		arr.Elements = arr.Elements[1:] // unsupported: mutates the live node's field directly
 
-	out := doc.Bytes()
-	reparsed, perr := Parse(out)
-	if perr != nil {
-		t.Fatalf("output does not re-parse after mutating the live container: %v\noutput: %q", perr, out)
-	}
+		out := doc.Bytes()
+		reparsed, perr := Parse(out)
+		if perr != nil {
+			t.Fatalf("output does not re-parse: %v\noutput: %q", perr, out)
+		}
 
-	node2 := reparsed.Get("arr")
-	arr2, ok2 := node2.(*ArrayNode)
-	if !ok2 {
-		t.Fatalf("re-parsed Get(\"arr\") returned %T, want *ArrayNode", node2)
-	}
-	if len(arr2.Elements) != 2 {
-		t.Errorf("BUG M-3: external mutation of the container returned by Get() is dropped by Bytes():\n"+
-			"  got  %d elements after re-parse\n"+
-			"  want 2 elements (the mutation should have survived)\n"+
-			"output: %q", len(arr2.Elements), out)
-	}
+		node2 := reparsed.Get("arr")
+		arr2, ok2 := node2.(*ArrayNode)
+		if !ok2 {
+			t.Fatalf("re-parsed Get(\"arr\") returned %T, want *ArrayNode", node2)
+		}
+		if len(arr2.Elements) != 3 {
+			t.Errorf("direct field mutation on the node returned by Get() unexpectedly affected Bytes():\n"+
+				"  got  %d elements after re-parse\n"+
+				"  want 3 elements (per the documented contract, this mutation is NOT supported and must not survive)\n"+
+				"output: %q", len(arr2.Elements), out)
+		}
+	})
+
+	// (b) The supported path: Delete with an index path (e.g. "arr[0]")
+	// correctly removes the element and marks the node dirty, so the
+	// change IS reflected by Bytes().
+	t.Run("Delete with index path mutates and is reflected", func(t *testing.T) {
+		doc := mustParse(t, "arr = [1, 2, 3]\n")
+
+		if err := doc.Delete("arr[0]"); err != nil {
+			t.Fatalf("Delete(\"arr[0]\") returned error: %v", err)
+		}
+
+		out := doc.Bytes()
+		reparsed, perr := Parse(out)
+		if perr != nil {
+			t.Fatalf("output does not re-parse after Delete: %v\noutput: %q", perr, out)
+		}
+
+		node := reparsed.Get("arr")
+		arr, ok := node.(*ArrayNode)
+		if !ok {
+			t.Fatalf("re-parsed Get(\"arr\") returned %T, want *ArrayNode", node)
+		}
+		if len(arr.Elements) != 2 {
+			t.Fatalf("after Delete(\"arr[0]\"), got %d elements after re-parse, want 2\noutput: %q", len(arr.Elements), out)
+		}
+		v0, ok0 := arr.Elements[0].(*IntegerNode)
+		v1, ok1 := arr.Elements[1].(*IntegerNode)
+		if !ok0 || !ok1 || v0.Val != 2 || v1.Val != 3 {
+			t.Errorf("after Delete(\"arr[0]\"), want remaining elements [2, 3], got elements %#v", arr.Elements)
+		}
+	})
+
+	// (b, continued) Set can also replace the whole array wholesale, which
+	// is the fallback supported path when an individual element needs to
+	// change in ways Delete/index-Set don't cover directly.
+	t.Run("Set replacing the whole array mutates and is reflected", func(t *testing.T) {
+		doc := mustParse(t, "arr = [1, 2, 3]\n")
+
+		if err := doc.Set("arr", []any{int64(2), int64(3)}); err != nil {
+			t.Fatalf("Set(\"arr\", ...) returned error: %v", err)
+		}
+
+		out := doc.Bytes()
+		reparsed, perr := Parse(out)
+		if perr != nil {
+			t.Fatalf("output does not re-parse after Set: %v\noutput: %q", perr, out)
+		}
+
+		node := reparsed.Get("arr")
+		arr, ok := node.(*ArrayNode)
+		if !ok {
+			t.Fatalf("re-parsed Get(\"arr\") returned %T, want *ArrayNode", node)
+		}
+		if len(arr.Elements) != 2 {
+			t.Errorf("after Set(\"arr\", [2, 3]), got %d elements after re-parse, want 2\noutput: %q", len(arr.Elements), out)
+		}
+	})
 }
 
 // =====================================================================

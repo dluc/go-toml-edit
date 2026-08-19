@@ -32,7 +32,7 @@ func Parse(src []byte) (*DocumentNode, error) {
 
 	tokens, err := lex(src)
 	if err != nil {
-		return nil, err
+		return nil, adjustParseErrorOffsetForBOM(err, leadingBOM)
 	}
 	p := &parser{
 		tokens: tokens,
@@ -41,10 +41,24 @@ func Parse(src []byte) (*DocumentNode, error) {
 	}
 	doc, err := p.parseDocument()
 	if err != nil {
-		return nil, err
+		return nil, adjustParseErrorOffsetForBOM(err, leadingBOM)
 	}
 	doc.leadingBOM = leadingBOM
 	return doc, nil
+}
+
+// adjustParseErrorOffsetForBOM re-bases a *ParseError's Offset from the
+// (possibly BOM-stripped) slice that was actually lexed/parsed back onto the
+// original bytes the caller passed to Parse. Line/Column are untouched: the
+// BOM occupies no visual line or column, so those remain correct as-is.
+func adjustParseErrorOffsetForBOM(err error, leadingBOM []byte) error {
+	if len(leadingBOM) == 0 {
+		return err
+	}
+	if pe, ok := err.(*ParseError); ok {
+		pe.Offset += len(leadingBOM)
+	}
+	return err
 }
 
 // utf8BOMBytes is the UTF-8 encoding of U+FEFF (byte order mark).
@@ -102,6 +116,7 @@ func (p *parser) errorfAt(tok Token, format string, args ...any) error {
 	return &ParseError{
 		Line:    tok.Line,
 		Column:  tok.Column,
+		Offset:  tok.Offset,
 		Message: fmt.Sprintf(format, args...),
 	}
 }

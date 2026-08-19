@@ -287,6 +287,15 @@ func setKeyInParent(parent Node, key string, valNode Node) error {
 		if p.partIndex >= len(p.kv.Key.Parts) {
 			return setKeyInParent(p.kv.Val, key, valNode)
 		}
+		if p.kv.Key.Parts[p.partIndex] == key && p.partIndex+1 >= len(p.kv.Key.Parts) {
+			// key is the terminal dotted-key part (e.g. "b" in "a.b = 1"):
+			// update the existing KV's value in place rather than treating
+			// this as an intermediate segment.
+			carryStringStyle(p.kv.Val, valNode)
+			p.kv.Val = valNode
+			p.kv.markDirty()
+			return nil
+		}
 		return fmt.Errorf("cannot set key %q: intermediate dotted key view", key)
 	default:
 		return fmt.Errorf("cannot set key %q in %s node", key, parent.Type())
@@ -485,9 +494,38 @@ func (d *DocumentNode) deleteKeyFromParent(parent Node, key string) error {
 		deleteKeyFromChildren(&p.Children, key)
 		p.markDirty()
 		return nil
+	case *dottedKeyGroup:
+		// p represents multiple KVs sharing a dotted-key prefix (e.g.
+		// "a.b = 1" and "a.c = 2" both sharing prefix "a"). Find every KV
+		// whose part at this group's depth matches key and remove it
+		// entirely from the owning children slice: TOML forbids a dotted
+		// key from existing both as a scalar and as a further-nested
+		// prefix at the same time, so every matching KV -- whether key is
+		// its terminal part or it continues deeper -- lies wholly beneath
+		// the path being deleted and must go in full.
+		for _, kv := range p.kvs {
+			if p.depth < len(kv.Key.Parts) && kv.Key.Parts[p.depth] == key {
+				removeKVByIdentity(p.children, kv)
+			}
+		}
+		return nil
 	default:
 		// Silent no-op for unsupported parent types.
 		return nil
+	}
+}
+
+// removeKVByIdentity removes the KeyValueNode matching target (by pointer
+// identity) from children, if present.
+func removeKVByIdentity(children *[]Node, target *KeyValueNode) {
+	if children == nil {
+		return
+	}
+	for i, child := range *children {
+		if kv, ok := child.(*KeyValueNode); ok && kv == target {
+			*children = append((*children)[:i], (*children)[i+1:]...)
+			return
+		}
 	}
 }
 

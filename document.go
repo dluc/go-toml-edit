@@ -92,7 +92,7 @@ func resolveKeySegment(
 // resolveKeyInDocument searches the document's top-level children for a key.
 func resolveKeyInDocument(doc *DocumentNode, scope *DocumentNode, tablePath []string, key string) (Node, []string, error) {
 	// Check top-level KVs -- collect all matching dotted keys with this prefix
-	node, tablePath2, err := resolveKeyInKVList(doc, scope.Children, tablePath, key)
+	node, tablePath2, err := resolveKeyInKVList(doc, &scope.Children, tablePath, key)
 	if err == nil {
 		return node, tablePath2, nil
 	}
@@ -135,7 +135,7 @@ func resolveKeyInDocument(doc *DocumentNode, scope *DocumentNode, tablePath []st
 // resolveKeyInTable searches a table's children and sub-tables for a key.
 func resolveKeyInTable(doc *DocumentNode, scope *TableNode, currentTablePath []string, key string) (Node, []string, error) {
 	// Check direct children (KVs) -- collect all matching dotted keys
-	node, tablePath, err := resolveKeyInKVList(doc, scope.Children, currentTablePath, key)
+	node, tablePath, err := resolveKeyInKVList(doc, &scope.Children, currentTablePath, key)
 	if err == nil {
 		return node, tablePath, nil
 	}
@@ -181,7 +181,7 @@ func resolveKeyInTable(doc *DocumentNode, scope *TableNode, currentTablePath []s
 // next ArrayTableNode with the same key path, belong to this entry.
 func resolveKeyInArrayTable(doc *DocumentNode, scope *ArrayTableNode, currentTablePath []string, key string) (Node, []string, error) {
 	// Check direct children (KVs) -- collect all matching dotted keys
-	node, tablePath, err := resolveKeyInKVList(doc, scope.Children, currentTablePath, key)
+	node, tablePath, err := resolveKeyInKVList(doc, &scope.Children, currentTablePath, key)
 	if err == nil {
 		return node, tablePath, nil
 	}
@@ -295,7 +295,7 @@ func scopedDescendantIndices(doc *DocumentNode, scopeIdx int, arrayKeyPath, pref
 
 // resolveKeyInInlineTable searches an inline table's children for a key.
 func resolveKeyInInlineTable(scope *InlineTableNode, key string) (Node, []string, error) {
-	node, tablePath, err := resolveKeyInKVList(nil, scope.Children, nil, key)
+	node, tablePath, err := resolveKeyInKVList(nil, &scope.Children, nil, key)
 	if err == nil {
 		return node, tablePath, nil
 	}
@@ -365,9 +365,10 @@ func (d *dottedKeyView) Value() any     { return d.kv.Val }
 // prefix "database" at depth 0. This acts as a virtual table for resolution.
 type dottedKeyGroup struct {
 	nullNode
-	kvs   []*KeyValueNode
-	depth int // how many leading parts have been consumed
-	doc   *DocumentNode
+	kvs      []*KeyValueNode
+	depth    int // how many leading parts have been consumed
+	doc      *DocumentNode
+	children *[]Node // the owning children slice the kvs live in (for edits)
 }
 
 func (g *dottedKeyGroup) Type() NodeType { return NodeTable }
@@ -443,9 +444,14 @@ func hasPrefix(path, prefix []string) bool {
 // It collects all KVs whose first part matches key. If there's a single
 // exact match (Parts == [key]), it returns the value. If there are multiple
 // dotted keys sharing the prefix, it returns a dottedKeyGroup.
-func resolveKeyInKVList(doc *DocumentNode, children []Node, tablePath []string, key string) (Node, []string, error) {
+//
+// children is a pointer to the owning slice (e.g. &scope.Children) rather
+// than a plain slice value. A dottedKeyGroup needs to be able to mutate the
+// slice it came from later (see deleteKeyFromParent's *dottedKeyGroup case),
+// which requires the slice's address, not just a copy of its header.
+func resolveKeyInKVList(doc *DocumentNode, children *[]Node, tablePath []string, key string) (Node, []string, error) {
 	var matching []*KeyValueNode
-	for _, child := range children {
+	for _, child := range *children {
 		if kv, ok := child.(*KeyValueNode); ok {
 			if len(kv.Key.Parts) > 0 && kv.Key.Parts[0] == key {
 				matching = append(matching, kv)
@@ -463,7 +469,7 @@ func resolveKeyInKVList(doc *DocumentNode, children []Node, tablePath []string, 
 		return &dottedKeyView{kv: kv, partIndex: 1, doc: doc}, tablePath, nil
 	}
 	// Multiple KVs share this prefix -- return a group
-	return &dottedKeyGroup{kvs: matching, depth: 1, doc: doc}, tablePath, nil
+	return &dottedKeyGroup{kvs: matching, depth: 1, doc: doc, children: children}, tablePath, nil
 }
 
 // resolveKeyInDottedGroup handles key lookups within a dottedKeyGroup.
@@ -486,7 +492,7 @@ func resolveKeyInDottedGroup(doc *DocumentNode, group *dottedKeyGroup, key strin
 		return &dottedKeyView{kv: kv, partIndex: group.depth + 1, doc: doc}, nil, nil
 	}
 	// Still multiple matches -- continue grouping at the next depth
-	return &dottedKeyGroup{kvs: matching, depth: group.depth + 1, doc: doc}, nil, nil
+	return &dottedKeyGroup{kvs: matching, depth: group.depth + 1, doc: doc, children: group.children}, nil, nil
 }
 
 // buildCompoundView checks if any TableNode or ArrayTableNode has a KeyPath
@@ -587,6 +593,16 @@ func resolveKeyInDottedView(doc *DocumentNode, view *dottedKeyView, key string) 
 // target node. For key-value pairs, the value node is returned (not the
 // KeyValueNode wrapper). Returns nil if the path is syntactically invalid or
 // the key is not found.
+//
+// The returned node is the document's live, internal node -- not a copy --
+// so it is suitable for reading and for further structured navigation (e.g.
+// type-asserting to *ArrayNode and inspecting Elements). Directly mutating
+// an exported container field on the returned node (ArrayNode.Elements,
+// InlineTableNode.Children, TableNode.Children, etc.) is not a supported
+// mutation surface: it does not mark the node dirty, so Bytes() may
+// re-render it from its original raw bytes and silently drop the change.
+// To modify a value, use the edit APIs (Set, Delete, NewTable,
+// NewArrayTable), which correctly mark affected nodes dirty.
 //
 // Path syntax uses dots to separate keys (e.g. "server.host"), brackets for
 // array indices (e.g. "items[0]"), and supports negative indices (e.g. "items[-1]"
